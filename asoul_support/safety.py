@@ -1,6 +1,7 @@
 """Persistent account safety holds and shared per-room budgets at the IO boundary."""
 
 import time
+import json
 from urllib.parse import urlsplit, parse_qs
 from .runtime import (
     data_dir,
@@ -15,6 +16,10 @@ from .policies import DANMAKU_SESSION_ATTEMPT_LIMIT, LIVE_LIKE_BATCHES
 
 RATE_COOLDOWN = 300
 NETWORK_COOLDOWN = 60
+HEARTBEAT_PATHS = {
+    "/xlive/data-interface/v1/x25Kn/E",
+    "/xlive/data-interface/v1/x25Kn/X",
+}
 READ_POST_PATHS = {"/room/v1/Room/get_status_info_by_uids"}
 
 
@@ -177,13 +182,24 @@ def operation(url, data, method):
     parsed = urlsplit(url)
     params = parse_qs(parsed.query)
     if isinstance(data, bytes):
-        params.update(parse_qs(data.decode("utf-8", errors="replace")))
+        body = data.decode("utf-8", errors="replace")
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            payload = None
+        if isinstance(payload, dict):
+            params.update({key: [str(value)] for key, value in payload.items()})
+        else:
+            params.update(parse_qs(body))
     room = next((params[name][0] for name in ("roomid", "room_id") if params.get(name)), "")
-    kind = (
-        "danmaku"
-        if parsed.path == "/msg/send"
-        else ("like" if parsed.path.endswith("/likeReportV3") else "other")
-    )
+    if parsed.path == "/msg/send":
+        kind = "danmaku"
+    elif parsed.path.endswith("/likeReportV3"):
+        kind = "like"
+    elif parsed.path in HEARTBEAT_PATHS:
+        kind = "heartbeat"
+    else:
+        kind = "other"
     return {"path": parsed.path, "room": room, "kind": kind, "method": method}
 
 
@@ -238,9 +254,17 @@ def observe(sessdata, url, response, *, mutation=False, op=None):
             and (response.get("code", 0) >= 500 or response.get("code") == 408)
         )
     ):
-        hold_account(
-            sessdata, "uncertain", "操作结果未知，已停止重复发送；请核对服务端进度", operation=op
-        )
+        if path in HEARTBEAT_PATHS:
+            # Keep a single IO attempt. After cooldown, workers establish a new E chain;
+            # replaying an X payload could reuse stale sequence/timestamp state.
+            hold_account(
+                sessdata, "network", "心跳连接异常，冷却后自动重建会话",
+                code=response.get("code"), seconds=NETWORK_COOLDOWN, operation=op,
+            )
+        else:
+            hold_account(
+                sessdata, "uncertain", "操作结果未知，已停止重复发送；请核对服务端进度", operation=op
+            )
     elif decision:
         kind, reason, delay = decision
         if kind == "rate" and response.get("retry_after"):

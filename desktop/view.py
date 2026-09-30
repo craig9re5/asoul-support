@@ -356,6 +356,13 @@ class TrayUI:
             self.tray.icon = icon_image(color)
             self.last_color = color
         self.pause_button.configure(text="恢复挂机" if snap["paused"] else "暂停挂机")
+        hold = snap.get("safety", {})
+        cooling = bool(hold.get("blocked") and hold.get("until"))
+        self.safety_button.configure(
+            text=("冷却中 · 自动恢复" if cooling else "重新扫码登录"
+                  if hold.get("kind") in ("auth", "credentials") else "解除异常暂停"),
+            state="normal" if hold.get("blocked") else "disabled",
+        )
 
     def _render_rows(self, snap):
         self.rows_cache.clear()
@@ -451,9 +458,9 @@ class TrayUI:
         if hold.get("blocked"):
             until = hold.get("until")
             suffix = (
-                " · 最早恢复 " + time.strftime("%H:%M:%S", time.localtime(until))
+                " · 自动恢复时间 " + time.strftime("%H:%M:%S", time.localtime(until))
                 if until
-                else " · 托盘菜单中选择“处理账号保护暂停”"
+                else " · 点击下方“解除异常暂停”按钮"
             )
             self.footer.set(hold["reason"] + suffix)
             return

@@ -155,6 +155,13 @@ def build_controls(self, body, p):
         ("📂 查看日志", lambda: os.startfile(str(self.engine.root / "logs"))),
     ]:
         ModernButton(buttons, text=text, command=callback, px=p).pack(side="left", padx=(p(6), 0))
+    recovery = tk.Frame(body, bg=BG_WINDOW)
+    recovery.pack(fill="x", pady=(0, p(6)))
+    self.safety_button = ModernButton(
+        recovery, text="解除异常暂停", command=self.on_safety_resume,
+        px=p, state="disabled",
+    )
+    self.safety_button.pack(side="left")
     self.footer = tk.StringVar()
     self.footer_label = tk.Label(
         body,

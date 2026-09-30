@@ -61,6 +61,58 @@ class SecurityTests(unittest.TestCase):
             )
         read.assert_called_once()
 
+    def test_heartbeat_transport_failures_cool_down_without_replaying(self):
+        failures = [
+            {"code": -1, "error_kind": "network"},
+            {"code": -1, "error_kind": "data"},
+            {"code": 503, "error_kind": "http"},
+            {"code": 408, "error_kind": "http"},
+        ]
+        for path in safety.HEARTBEAT_PATHS:
+            for failure in failures:
+                with self.subTest(path=path, failure=failure):
+                    safety.resume(SESSION, confirmed=True)
+                    with patch.object(http, "_once", return_value=failure) as send:
+                        http.post_form("https://live-trace.bilibili.com" + path,
+                                       {"room_id": "1"}, HEADERS)
+                    send.assert_called_once()
+                    hold = safety.status(SESSION)
+                    self.assertEqual(hold["kind"], "network")
+                    self.assertEqual(hold["until"] - hold["since"], 60)
+                    self.assertEqual(hold["operation"]["kind"], "heartbeat")
+                    self.assertEqual(hold["operation"]["room"], "1")
+                    with patch.object(safety.time, "time", return_value=hold["until"] + 1):
+                        self.assertFalse(safety.status(SESSION)["blocked"])
+                        self.assertTrue(safety.resume(SESSION, confirmed=True)[0])
+
+    def test_heartbeat_platform_rejections_keep_stronger_protection(self):
+        url = "https://live-trace.bilibili.com/xlive/data-interface/v1/x25Kn/X"
+        for code, kind in ((-352, "review"), (-101, "auth"), (403, "permission"), (429, "rate")):
+            with self.subTest(code=code):
+                write_json(self.root / "state/safety/uid-123.json", {})
+                with patch.object(http, "_once", return_value={"code": code}):
+                    http.post_form(url, {"room_id": "1"}, HEADERS)
+                self.assertEqual(safety.status(SESSION)["kind"], kind)
+
+    def test_engine_reprobes_when_network_cooldown_expires(self):
+        initialize(self.root, [{"room": 1, "uid": 2, "name": "test"}])
+        save_login(SESSION, CSRF, self.root / "credentials.json")
+        engine = Engine(self.root, job=Mock())
+        engine.next_check = 99999999999
+        process = Mock()
+        process.poll.return_value = None
+        engine.workers[1] = process
+        safety.hold_account(SESSION, "network", "temporary", seconds=60)
+        hold = safety.status(SESSION)
+        with patch.object(engine, "spawn") as spawn:
+            engine.tick()
+            process.terminate.assert_called_once()
+            spawn.assert_not_called()
+            with patch.object(safety.time, "time", return_value=hold["until"] + 1):
+                engine.tick()
+            self.assertEqual(spawn.call_args.args[0], "--probe")
+            self.assertFalse(engine.safety["blocked"])
+
     def test_http_500_write_has_unknown_outcome(self):
         with patch.object(http, "_once", return_value={"code": 500, "error_kind": "http"}):
             http.post_form(URL, {"roomid": "1"}, HEADERS)

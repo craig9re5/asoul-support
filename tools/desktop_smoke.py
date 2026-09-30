@@ -40,8 +40,22 @@ def main():
                 engine.safety = {"blocked": True, "kind": "review", "reason": "测试账号保护暂停"}
                 ui.refresh()
                 assert "测试账号保护暂停" in ui.footer.get()
+                assert "解除异常暂停" in ui.footer.get()
+                assert ui.safety_button.winfo_manager() == "pack"
+                assert ui.safety_button.cget("state") == "normal"
+                engine.safety = {"blocked": True, "kind": "network", "until": time.time() + 60,
+                                 "reason": "心跳连接异常"}
+                ui.refresh()
+                assert ui.safety_button.cget("text") == "冷却中 · 自动恢复"
+                engine.safety = {"blocked": True, "kind": "auth", "reason": "登录失效"}
+                ui.refresh()
+                assert ui.safety_button.cget("text") == "重新扫码登录"
+                engine.safety = {"blocked": True, "kind": "review", "reason": "测试账号保护暂停"}
+                ui.refresh()
                 assert ui.rows_cache["2"]["phase"] == "账号保护暂停"
                 engine.safety = {"blocked": False}
+                ui.refresh()
+                assert ui.safety_button.cget("state") == "disabled"
                 settings = SettingsDialog(ui.root, engine, ui.px, lambda: None)
                 settings.update_idletasks()
                 assert settings.e_sess.cget("show")
