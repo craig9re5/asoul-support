@@ -19,8 +19,6 @@
 
 ## Windows 桌面
 
-旧桌面发布包已撤回，目前先提供源码；新的二进制包需单独检查后再发布。可以按下文从源码运行桌面程序。关闭窗口会保留托盘；从托盘菜单退出才会结束程序及其子进程。
-
 在设置中配置登录凭证和动作开关。数据保存在 `%LOCALAPPDATA%\LiveSupport`，不保存在源码目录。完整安装与开机启动说明见 [DESKTOP.md](DESKTOP.md)。
 
 推荐在设置中点击「扫码登录」，用 B 站 App 扫码确认即可。[扫码登录说明](docs/QR_LOGIN.md)。
@@ -81,5 +79,3 @@ powershell -ExecutionPolicy Bypass -File build_desktop.ps1
 - [贡献说明](CONTRIBUTING.md)、[安全报告与凭证处理](SECURITY.md)
 
 代码使用 [MIT License](LICENSE)。上游品牌图片的许可范围另见 [NOTICE.md](NOTICE.md)。
-
-公开历史与发布产物清理范围、已有克隆的处理方式见 [docs/PUBLICATION_CLEANUP.md](docs/PUBLICATION_CLEANUP.md)。
