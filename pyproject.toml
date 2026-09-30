@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "asoul-support"
+version = "2026.9.30.8"
+description = "LiveSupport desktop and CLI for configurable Bilibili live rooms"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "XiaoYiWeio and LiveSupport contributors"}]
+dependencies = []
+
+[project.optional-dependencies]
+secure-store = ["keyring>=25,<26"]
+desktop = ["pystray==0.19.5", "Pillow==12.2.0", "qrcode==8.2"]
+
+[project.scripts]
+asoul-heartbeat = "asoul_support.entrypoints:heartbeat"
+asoul-checkin = "asoul_support.entrypoints:checkin"
+asoul-videos = "asoul_support.entrypoints:videos"
+asoul-dynamics = "asoul_support.entrypoints:dynamics"
+asoul-summary = "asoul_support.daily_summary:main"
+
+[project.urls]
+Repository = "https://github.com/craig9re5/asoul-support"
+Upstream = "https://github.com/XiaoYiWeio/asoul-support"
+
+[tool.setuptools.packages.find]
+include = ["asoul_support*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py39"]

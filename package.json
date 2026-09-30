@@ -1,0 +1,8 @@
+{
+  "name": "asoul-support",
+  "version": "2026.9.30-8",
+  "description": "LiveSupport Windows desktop and shared Python CLI",
+  "private": true,
+  "license": "MIT",
+  "repository": "https://github.com/craig9re5/asoul-support"
+}

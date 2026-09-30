@@ -1,0 +1,48 @@
+name: Optional account actions
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_like:
+        description: Like recent videos
+        type: boolean
+        default: false
+      dynamic_like:
+        description: Like recent dynamics
+        type: boolean
+        default: false
+      days:
+        description: Recent days
+        default: '7'
+      members:
+        description: Member names separated by commas
+        default: '小松绿Viridis'
+
+permissions:
+  contents: read
+concurrency:
+  group: account-actions
+  cancel-in-progress: false
+
+jobs:
+  support:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SESSDATA: ${{ secrets.SESSDATA }}
+      BILI_JCT: ${{ secrets.BILI_JCT }}
+      DAYS: ${{ inputs.days }}
+      MEMBERS: ${{ inputs.members }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Validate login
+        run: python scripts/check_auth.py
+      - name: Videos
+        if: inputs.video_like
+        run: python scripts/videos.py --days "$DAYS" --members "$MEMBERS" --sessdata "$SESSDATA" --bili-jct "$BILI_JCT" --delay 8
+      - name: Dynamics
+        if: inputs.dynamic_like
+        run: python scripts/dynamics.py --days "$DAYS" --members "$MEMBERS" --sessdata "$SESSDATA" --bili-jct "$BILI_JCT" --delay 8

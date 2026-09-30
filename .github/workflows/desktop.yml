@@ -1,0 +1,36 @@
+name: Desktop build
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      ASOUL_APP_DATA: ${{ github.workspace }}/build/desktop-ci-data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r requirements-desktop.txt
+      - run: python tools/offline_test.py
+      - run: python tools/desktop_smoke.py
+      - run: ./build_desktop.ps1 -Mode onefile
+      - name: Frozen diagnostics
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath './dist/onefile/LiveSupport.exe' -ArgumentList '--diagnostic' -WindowStyle Hidden -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Frozen diagnostic failed' }
+          $value = Get-Content "$env:ASOUL_APP_DATA/diagnostic.json" -Raw | ConvertFrom-Json
+          if (-not $value.ok -or -not $value.frozen) { throw 'Invalid diagnostic result' }
+      - name: Add release documents
+        shell: pwsh
+        run: |
+          Copy-Item -LiteralPath README.md,DESKTOP.md,Install-Desktop.ps1,LICENSE,NOTICE.md,THIRD_PARTY_LICENSES.md -Destination dist/onefile
+          New-Item -ItemType Directory -Path dist/onefile/docs -Force | Out-Null
+          Copy-Item -LiteralPath docs/GUI_REVIEW.md,docs/QR_LOGIN.md,docs/ACCOUNT_EXPERIMENT.md,docs/LIVE_LIKES.md,docs/ACCOUNT_SAFETY.md -Destination dist/onefile/docs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LiveSupport-Windows
+          path: dist/onefile/

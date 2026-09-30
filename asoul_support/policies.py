@@ -1,0 +1,31 @@
+"""Task limits and protocol defaults; compatibility names retained."""
+
+LIGHT_UP_DANMAKU_COUNT = 10
+INTIMACY_DANMAKU_COUNT = 5
+DANMAKU_DELAY = 0
+DANMAKU_RECHECK_INTERVAL = 10 * 60
+DANMAKU_WORK_BUDGET = 90
+DANMAKU_ATTEMPTS_PER_CHECK = 16
+DANMAKU_SESSION_ATTEMPT_LIMIT = 35
+WATCH_MINUTES = 25
+HEARTBEAT_INTERVAL = 60
+LIVE_LIKE_BATCH_SIZE = 30
+LIVE_LIKE_BATCHES = 5
+LIVE_LIKE_DELAY = 15
+LIVE_LIKE_PROGRESS_DELAY = 3
+LIVE_LIKE_PROGRESS_RETRY_DELAY = 5
+_DANMAKU_MSGS = [
+    "？",
+    "dnys",
+    "咋这样",
+    "OK",
+    "3",
+    "不赖",
+    "做人真的可以",
+    "好吧",
+    "呃呃",
+    "考",
+    "+3",
+    "+6",
+    "+9",
+]

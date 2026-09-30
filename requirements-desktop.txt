@@ -1,0 +1,4 @@
+pyinstaller==6.22.2
+pystray==0.19.5
+Pillow==12.2.0
+qrcode==8.2
