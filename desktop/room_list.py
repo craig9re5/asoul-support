@@ -1,6 +1,7 @@
 """Scrollable room cards with the selection/item contract used by desktop actions."""
 
 import tkinter as tk
+from tkinter import font as tkfont
 from .avatars import round_avatar
 from .presentation import gain_label
 from .widgets import FONT_FAMILY
@@ -9,6 +10,7 @@ BACKGROUND = "#ffffff"
 SELECTED = "#edf3f1"
 INK = "#253638"
 MUTED = "#657477"
+ROW_HEIGHT = 64
 
 
 class RoomList(tk.Frame):
@@ -33,7 +35,32 @@ class RoomList(tk.Frame):
     def _resize(self, event):
         self.canvas.itemconfigure(self.window, width=event.width)
         for item in self.items.values():
-            item["title"].configure(wraplength=max(100, event.width - self.ui.px(85)))
+            self._fit_headline(item, event.width)
+
+    def _fit_headline(self, item, width):
+        available = max(1, width - self.ui.px(66))
+        name_font = tkfont.Font(font=item["name"].cget("font"))
+        name = self._elide(item.get("name_text", ""), name_font, int(available * 0.48))
+        item["name"].configure(text=name)
+        title_font = tkfont.Font(font=item["title"].cget("font"))
+        item["title"].configure(text=self._elide(item.get("title_text", ""), title_font,
+                                               available - name_font.measure(name) - self.ui.px(10)))
+
+    @staticmethod
+    def _elide(text, font, width):
+        text = " ".join(str(text).split())
+        if font.measure(text) <= width:
+            return text
+        if font.measure("…") > width:
+            return ""
+        left, right = 0, len(text)
+        while left < right:
+            middle = (left + right + 1) // 2
+            if font.measure(text[:middle] + "…") <= width:
+                left = middle
+            else:
+                right = middle - 1
+        return text[:left] + "…"
 
     def _step(self, step):
         if not self.order:
@@ -90,31 +117,35 @@ class RoomList(tk.Frame):
 
     def insert(self, _parent, _position, *, iid, values, tags=()):
         p = self.ui.px
-        frame = tk.Frame(self.content, bg=BACKGROUND, padx=p(16), pady=p(12))
+        frame = tk.Frame(self.content, bg=BACKGROUND, padx=p(12), pady=p(8), height=p(ROW_HEIGHT))
         frame.pack(fill="x")
+        frame.grid_propagate(False)
         frame.columnconfigure(1, weight=1)
         avatar = tk.Label(frame, text="", bg=SELECTED, fg=MUTED, width=3,
-                          font=(FONT_FAMILY, 14), anchor="center")
-        avatar.grid(row=0, column=0, rowspan=3, padx=(0, p(12)), sticky="n")
+                          font=(FONT_FAMILY, 12), anchor="center")
+        avatar.grid(row=0, column=0, rowspan=2, padx=(0, p(10)), sticky="n")
+        headline = tk.Frame(frame, bg=BACKGROUND)
+        headline.grid(row=0, column=1, sticky="ew")
+        headline.columnconfigure(1, weight=1)
         labels = {}
-        for name, row, size, color in (("name", 0, 11, INK), ("title", 1, 9, MUTED)):
-            label = tk.Label(frame, bg=BACKGROUND, fg=color, anchor="w", justify="left",
+        for column, (name, size, color) in enumerate((("name", 10, INK), ("title", 9, MUTED))):
+            label = tk.Label(headline, bg=BACKGROUND, fg=color, anchor="w", justify="left", padx=0, pady=0,
                              font=(FONT_FAMILY, size, "bold" if name == "name" else "normal"))
-            label.grid(row=row, column=1, sticky="ew", pady=(p(3), 0))
+            label.grid(row=0, column=column, sticky="ew", padx=(0, p(8) if column == 0 else 0))
             labels[name] = label
         metadata = tk.Frame(frame, bg=BACKGROUND)
-        metadata.grid(row=2, column=1, sticky="ew", pady=(p(6), 0))
+        metadata.grid(row=1, column=1, sticky="ew", pady=(p(3), 0))
         for column, (name, color) in enumerate((("phase", MUTED), ("medal", INK), ("gain", "#2d6763"))):
             metadata.columnconfigure(column, weight=1)
             labels[name] = tk.Label(metadata, bg=BACKGROUND, fg=color,
-                                    anchor="e" if name == "gain" else "w", font=(FONT_FAMILY, 9))
+                                    anchor="e" if name == "gain" else "w", font=(FONT_FAMILY, 9), padx=0, pady=0)
             labels[name].grid(row=0, column=column, sticky="ew", padx=(0, p(8) if column < 2 else 0))
         line = tk.Frame(frame, height=1, bg="#e2e8e6")
-        line.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(p(10), 0))
-        self.items[iid] = {"frame": frame, "avatar": avatar, "metadata": metadata,
+        line.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(p(8), 0))
+        self.items[iid] = {"frame": frame, "avatar": avatar, "metadata": metadata, "headline": headline,
                            "values": values, "tags": tags, **labels}
         self.order.append(iid)
-        for widget in (frame, avatar, metadata, *labels.values()):
+        for widget in (frame, avatar, headline, metadata, *labels.values()):
             widget.bind("<Button-1>", lambda _, key=iid: self._pick(key))
             widget.bind("<Double-1>", lambda _, key=iid: (self._pick(key), self.ui.on_open_room()))
             widget.bind("<Button-3>", lambda event, key=iid: self._context(key, event))
@@ -125,7 +156,7 @@ class RoomList(tk.Frame):
     def _paint(self, iid):
         item = self.items[iid]
         bg = SELECTED if iid == self.selected else BACKGROUND
-        for key in ("frame", "name", "title", "metadata", "phase", "medal", "gain"):
+        for key in ("frame", "name", "title", "headline", "metadata", "phase", "medal", "gain"):
             item[key].configure(bg=bg)
         if item.get("photo"):
             item["avatar"].configure(bg=bg)
@@ -137,8 +168,9 @@ class RoomList(tk.Frame):
             return {"values": item["values"], "tags": item["tags"]}
         values = item["values"]
         row = self.ui.rows_cache.get(iid, {})
-        item["name"].configure(text=values[0])
-        item["title"].configure(text=values[1])
+        item["name_text"] = row.get("name") or values[0]
+        item["title_text"] = values[1]
+        self._fit_headline(item, self.canvas.winfo_width())
         item["phase"].configure(text=values[4])
         item["medal"].configure(text=values[2].split("\n")[0])
         item["gain"].configure(text=gain_label(row) if row.get("medal_name") else "")
@@ -151,7 +183,7 @@ class RoomList(tk.Frame):
         if iid not in self.items:
             return
         item = self.items[iid]
-        photo = ImageTk.PhotoImage(round_avatar(image, self.ui.px(40)), master=self.ui.root)
+        photo = ImageTk.PhotoImage(round_avatar(image, self.ui.px(32)), master=self.ui.root)
         item["photo"] = photo
         item["avatar"].configure(image=photo, text="", width=0, bg=item["frame"].cget("bg"))
 

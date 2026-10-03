@@ -352,9 +352,11 @@ class TrayUI:
         title = "已暂停" if snap["paused"] else f"{active} 个直播间挂机中" if active else "等待开播"
         if snap["error"]:
             title = "需要处理"
+        live = sum(row.get("live_status") == 1 for row in snap["rows"])
         self.summary.set(
             snap["error"]
-            or f"{title} · 共 {len(snap['rows'])} 个关注直播间"
+            or f"关注 {len(snap['rows'])} · 直播 {live} · "
+            + ("已暂停" if snap["paused"] else f"挂机 {active}")
             + (" · 正在检查…" if snap["checking"] else "")
         )
         notice, until = getattr(self, "task_notice", ("", 0))

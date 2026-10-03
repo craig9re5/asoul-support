@@ -5,7 +5,7 @@ import tkinter as tk
 from .avatars import AvatarLoader
 from .room_list import RoomList
 from .presentation import phase_label, gain_label
-from .widgets import ModernButton, FONT_FAMILY, format_task_mini_badge
+from .widgets import ModernButton, FONT_FAMILY
 
 BG = "#f5f6f5"
 INK = "#253638"
@@ -39,38 +39,24 @@ class Workbench:
                                bd=0, anchor="w", padx=p(10), pady=p(12), font=(FONT_FAMILY, 10), cursor="hand2")
             button.pack(fill="x", pady=p(2))
         label(side, "本机运行 · 托盘常驻", size=9, color="#a6bab4", bg=SIDE).pack(side="bottom", anchor="w")
-        self.body = tk.Frame(shell, bg=BG, padx=p(24), pady=p(22))
+        self.body = tk.Frame(shell, bg=BG, padx=p(14), pady=p(14))
         self.body.pack(side="left", fill="both", expand=True)
         header = tk.Frame(self.body, bg=BG)
-        header.pack(fill="x", pady=(0,p(18)))
-        self.heading = label(header, "监控总览", size=20, bg=BG, bold=True)
+        header.pack(fill="x", pady=(0,p(10)))
+        self.heading = label(header, "监控总览", size=18, bg=BG, bold=True)
         self.heading.pack(side="left")
         ui.badge_frame = tk.Frame(header, bg="#ecfdf5", padx=p(8), pady=p(5))
         ui.badge_frame.pack(side="right")
         ui.account_label = label(ui.badge_frame, "正在验证登录…", size=9, bg="#ecfdf5")
         ui.account_label.pack()
         ui.account_label.bind("<Button-1>", lambda _: ui.open_settings(focus_auth=True))
-        controls = tk.Frame(self.body, bg=BG)
-        controls.pack(fill="x", pady=(0,p(16)))
-        ui.pause_button = ModernButton(controls, text="暂停挂机", command=lambda: ui.commands.put("toggle"),
-                                      primary=True, accent=ACCENT, accent_hover="#245550", px=p)
-        ui.pause_button.pack(side="right")
-        ModernButton(controls, text="立即检查", command=lambda: ui.commands.put("check"), px=p).pack(side="right", padx=p(8))
-        self.count = label(controls, "正在读取监控状态…", size=9, color=MUTED, bg=BG)
-        self.count.pack(side="left")
-        health = tk.Frame(self.body, bg="#e9f4ed", padx=p(14), pady=p(12))
-        health.pack(fill="x", pady=(0,p(18)))
-        ui.summary = tk.StringVar(value="正在启动…")
-        ui.summary_label = tk.Label(health, textvariable=ui.summary, bg="#e9f4ed", fg="#24634e",
-                                   font=(FONT_FAMILY, 10), anchor="w", wraplength=p(600))
-        ui.summary_label.pack(side="left", fill="x", expand=True)
-        ui.safety_button = ModernButton(health, text="解除异常暂停", command=ui.on_safety_resume, px=p, state="disabled")
-        ui.safety_button.pack(side="right", padx=(p(10),0))
+        self._build_toolbar()
+        self._build_footer()
         self.area = tk.Frame(self.body, bg=BG)
         self.area.pack(fill="both", expand=True)
         self.list_frame = tk.Frame(self.area, bg="white", highlightbackground="#e2e8e6", highlightthickness=1)
-        self.list_frame.pack(side="left", fill="both", expand=True, padx=(0,p(18)))
-        label(self.list_frame, "关注的直播间", size=11, bold=True).pack(anchor="w", padx=p(18), pady=p(14))
+        self.list_frame.pack(side="left", fill="both", expand=True, padx=(0,p(12)))
+        label(self.list_frame, "关注的直播间", size=10, bold=True).pack(anchor="w", padx=p(12), pady=p(8))
         ui.tree = RoomList(self.list_frame, ui)
         ui.tree.pack(fill="both", expand=True)
         ui.tree.bind("<<TreeviewSelect>>", lambda _: self.render_detail())
@@ -95,6 +81,9 @@ class Workbench:
         self.detail_title.pack(fill="x")
         self.detail_phase = label(self.detail_frame, "", size=9, color=MUTED)
         self.detail_phase.pack(fill="x", pady=(p(8),p(18)))
+        self.detail_live_title = label(self.detail_frame, "", size=9, color=MUTED)
+        self.detail_live_title.configure(wraplength=p(265))
+        self.detail_live_title.pack(fill="x", pady=(0,p(12)))
         self.detail_medal = label(self.detail_frame, "粉丝牌信息待更新", size=11)
         self.detail_medal.pack(fill="x")
         self.detail_gain = label(self.detail_frame, "今日亲密度：待更新", size=10, color=ACCENT)
@@ -117,18 +106,38 @@ class Workbench:
         ModernButton(action, text="打开直播间", command=ui.on_open_room, px=p).pack(side="left")
         self.redo_button = ModernButton(action, text="补齐任务", command=lambda: ui.on_redo_task("all"), px=p)
         self.redo_button.pack(side="left", padx=(p(8),0))
-        footer = tk.Frame(self.body, bg=BG)
-        footer.pack(fill="x", pady=(p(16),0))
+
+    def _build_toolbar(self):
+        ui, p = self.ui, self.ui.px
+        self.toolbar = tk.Frame(self.body, bg="#e9f4ed", padx=p(8), pady=p(5))
+        self.toolbar.pack(fill="x", pady=(0,p(10)))
+        ui.safety_button = ModernButton(self.toolbar, text="解除异常暂停", command=ui.on_safety_resume,
+                                       px=p, state="disabled")
+        ui.safety_button.pack(side="right", padx=(p(6),0))
+        ui.pause_button = ModernButton(self.toolbar, text="暂停挂机", command=lambda: ui.commands.put("toggle"),
+                                      primary=True, accent=ACCENT, accent_hover="#245550", px=p)
+        ui.pause_button.pack(side="right", padx=(p(6),0))
+        self.check_button = ModernButton(self.toolbar, text="立即检查", command=lambda: ui.commands.put("check"), px=p)
+        self.check_button.pack(side="right", padx=(p(6),0))
+        ui.summary = tk.StringVar(value="正在启动…")
+        ui.summary_label = tk.Label(self.toolbar, textvariable=ui.summary, bg="#e9f4ed", fg="#24634e",
+                                   font=(FONT_FAMILY, 9), anchor="w", width=1)
+        ui.summary_label.pack(side="left", fill="x", expand=True)
+
+    def _build_footer(self):
+        ui, p = self.ui, self.ui.px
+        self.footer_bar = tk.Frame(self.body, bg=BG)
+        self.footer_bar.pack(side="bottom", fill="x", pady=(p(8),0))
         for text, command in (("添加主播", ui.open_add_member), ("同步粉丝牌", ui.open_sync_medals)):
-            ModernButton(footer, text=text, command=command, px=p).pack(side="right", padx=(p(8),0))
+            ModernButton(self.footer_bar, text=text, command=command, px=p).pack(side="right", padx=(p(6),0))
         ui.footer = tk.StringVar()
-        ui.footer_label = tk.Label(self.body, textvariable=ui.footer, bg=BG, fg=MUTED,
-                                   font=(FONT_FAMILY, 9), anchor="w", justify="left", wraplength=p(750))
-        ui.footer_label.pack(fill="x", pady=(p(12),0))
+        ui.footer_label = tk.Label(self.footer_bar, textvariable=ui.footer, bg=BG, fg=MUTED,
+                                   font=(FONT_FAMILY, 9), anchor="w", justify="left", width=1)
+        ui.footer_label.pack(side="left", fill="x", expand=True)
+        ui.footer_label.bind("<Configure>", lambda e: ui.footer_label.configure(wraplength=max(1, e.width)))
 
     def render(self, snap):
         self.snap = snap
-        self.count.configure(text=f"{len(snap['rows'])} 个关注房间 · {sum(r.get('live_status') == 1 for r in snap['rows'])} 个正在直播")
         if not self.ui.tree.selection() and snap["rows"]:
             self.ui.tree.selection_set(str(snap["rows"][0]["room"]))
         for row in snap["rows"]:
@@ -153,6 +162,7 @@ class Workbench:
         row = self.ui.rows_cache.get(selected[0], {}) if selected else {}
         self.detail_title.configure(text=(row.get("name", "选择主播") + " · 今日任务"))
         self.detail_phase.configure(text=phase_label(row))
+        self.detail_live_title.configure(text=row.get("title", ""))
         self.detail_medal.configure(text=f"{row['medal_name']} Lv.{row.get('medal_level',0)}" if row.get("medal_name") else "暂无粉丝牌")
         self.detail_gain.configure(text=gain_label(row) if row.get("medal_name") else "")
         self.detail_exp.configure(text=f"等级经验 {row.get('intimacy',0)} / {row.get('next_intimacy',0)}" if not row.get("tasks_stale", True) else "经验数据待更新")

@@ -17,8 +17,13 @@ def main():
 
     with tempfile.TemporaryDirectory() as folder:
         root = Path(folder)
-        initialize(root, [{"name": "测试主播", "room": 2, "uid": 1}])
+        members = [{"name": f"测试主播{i}Viridis", "room": 2 * i, "uid": i} for i in range(1, 8)]
+        initialize(root, members)
         engine = Engine(root, job=Mock())
+        engine.statuses = {str(member["room"]): {"live_status": 1, "title": "超长直播标题\n" * 30}
+                           for member in members}
+        engine.status_times = {str(member["room"]): time.time() for member in members}
+        capacities = []
         with (
             patch("desktop.avatars.load_avatar", return_value=__import__("PIL.Image", fromlist=["Image"]).new("RGB", (32,32), "green")),
             patch("desktop.view.pystray.Icon", return_value=Mock()),
@@ -45,6 +50,10 @@ def main():
                 assert item["phase"].master == item["medal"].master == item["gain"].master
                 assert {item[key].grid_info()["row"] for key in ("phase", "medal", "gain")} == {0}
                 assert "双击" not in ui.footer.get() and "右键" not in ui.footer.get()
+                toolbar = ui.workbench.toolbar
+                assert ui.summary_label.master == ui.pause_button.master == ui.safety_button.master == toolbar
+                assert ui.workbench.check_button.master == toolbar
+                assert ui.footer_label.master == ui.workbench.footer_bar
                 # Map real widgets at both supported sizes to catch clipping.
                 ui.rows_cache["2"].update(medal_name="同行者", intimacy_gain=9)
                 values = list(item["values"])
@@ -54,6 +63,18 @@ def main():
                 for width, height in ((1180, 760), (980, 620)):
                     ui.root.geometry(f"{ui.px(width)}x{ui.px(height)}")
                     ui.root.update()
+                    canvas = ui.tree.canvas
+                    row_frames = [ui.tree.items[str(member["room"])]["frame"] for member in members]
+                    visible = sum(frame.winfo_rooty() >= canvas.winfo_rooty()
+                                  and frame.winfo_rooty() + frame.winfo_height() <= canvas.winfo_rooty() + canvas.winfo_height()
+                                  for frame in row_frames)
+                    assert visible >= 6, (width, height, visible)
+                    assert len({frame.winfo_height() for frame in row_frames}) == 1
+                    capacities.append((width, height, canvas.winfo_height() // row_frames[0].winfo_height()))
+                    for button in (ui.pause_button, ui.safety_button, ui.workbench.check_button):
+                        assert button.winfo_height() >= button.winfo_reqheight()
+                        assert button.winfo_y() + button.winfo_height() <= toolbar.winfo_height()
+                    assert ui.summary_label.winfo_width() >= ui.summary_label.winfo_reqwidth()
                     for key in ("phase", "medal", "gain"):
                         widget = item[key]
                         assert widget.winfo_width() >= widget.winfo_reqwidth(), (key, width)
@@ -118,7 +139,7 @@ def main():
                 ui.tray.stop()
                 ui.root.destroy()
                 engine.job.close()
-    print("Desktop views: OK (isolated data, no network)")
+    print(f"Desktop views: OK (isolated data, no network); visible room capacity: {capacities}")
     return 0
 
 
