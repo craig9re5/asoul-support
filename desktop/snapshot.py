@@ -1,4 +1,5 @@
 from desktop.health import number, heartbeat_timeout
+from datetime import datetime, timezone, timedelta
 import os
 import time
 from asoul_support.runtime import APP_VERSION, task_day
@@ -108,6 +109,13 @@ def project_row(engine, member, state, now):
     if safety.get("blocked"):
         phase = "账号保护暂停"
         task_error = safety.get("reason", "需要处理账号异常")
+    today_value = medal.get("today_intimacy")
+    checked = engine.account_checked_at
+    medal_day = (datetime.fromtimestamp(checked, timezone(timedelta(hours=8))).date().isoformat()
+                 if checked else "")
+    gain = (today_value if not tasks_stale and medal_day == task_day()
+            and isinstance(today_value, int) and not isinstance(today_value, bool)
+            and today_value >= 0 else None)
     return {
         **member,
         "phase": phase,
@@ -132,6 +140,8 @@ def project_row(engine, member, state, now):
         "medal_level": medal.get("level", 0),
         "is_lighted": medal.get("is_lighted", 0),
         "today_intimacy": medal.get("today_intimacy", 0),
+        "intimacy_gain": gain,
+        "avatar_url": live_info.get("face", ""),
         "day_limit": medal.get("day_limit", 0),
         "tasks": [] if tasks_stale else task_entry.get("tasks", []),
         "intimacy": task_entry.get("intimacy", 0),

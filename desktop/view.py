@@ -1,4 +1,6 @@
-from .tray_layout import configure_table_style, build_header, build_table, build_controls
+from .tray_layout import configure_table_style, build_room_menu
+from .workbench import Workbench
+from .presentation import phase_label
 from desktop.dispatch import Dispatcher
 import os
 import logging
@@ -44,19 +46,17 @@ class TrayUI:
         self.px = lambda value: max(1, round(value * self.scale))
         p = self.px
         self.root.title("LiveSupport · 直播助手")
-        w, h = (p(990), p(550))
+        w, h = (min(p(1180), self.root.winfo_screenwidth() - p(40)),
+                min(p(760), self.root.winfo_screenheight() - p(80)))
         self.root.geometry(f"{w}x{h}")
-        self.root.minsize(p(920), p(480))
+        self.root.minsize(min(p(980), w), min(p(620), h))
         self.root.protocol("WM_DELETE_WINDOW", self.root.withdraw)
         self.root.configure(bg=BG_WINDOW)
         self.closed = False
         center_window(self.root, None, w, h, p)
         configure_table_style(p)
-        body = tk.Frame(self.root, bg=BG_WINDOW, padx=p(18), pady=p(16))
-        body.pack(fill="both", expand=True)
-        build_header(self, body, p)
-        build_table(self, body, p)
-        build_controls(self, body, p)
+        self.workbench = Workbench(self)
+        build_room_menu(self)
         self.image = tk.PhotoImage(data=self._png_data())
         self.root.iconphoto(True, self.image)
         self.tray = pystray.Icon(
@@ -229,6 +229,7 @@ class TrayUI:
             snap = self.engine.snapshot()
             self._render_overview(snap)
             self._render_rows(snap)
+            self.workbench.render(snap)
             self._render_footer(snap)
         except Exception:
             logging.exception("Desktop refresh failed")
@@ -434,12 +435,7 @@ class TrayUI:
                 intimacy = row.get("intimacy", 0)
                 next_int = row.get("next_intimacy", 0)
                 if medal_name and level:
-                    icon = "🏅" if is_lighted else "⚪"
-                    if next_int and next_int > 0:
-                        pct = int(intimacy / next_int * 100)
-                        medal_str = f"{icon}{medal_name} Lv{level} ({intimacy}/{next_int}, {pct}%)"
-                    else:
-                        medal_str = f"{icon}{medal_name} Lv{level}"
+                    medal_str = f"{medal_name} Lv.{level}"
                 else:
                     medal_str = "—"
                 tasks = row.get("tasks", [])
@@ -448,18 +444,9 @@ class TrayUI:
                     if row.get("tasks_stale")
                     else format_task_mini_badge(tasks, is_lighted, has_medal=bool(medal_name))
                 )
-                live_dur = row.get("live_duration", "")
-                if row.get("active"):
-                    minutes = max(0, int((time.time() - (row.get("started") or time.time())) / 60))
-                    phase_str = f"{row['phase']} ({minutes}m)" + (
-                        f" · {live_dur}" if live_dur else ""
-                    )
-                    if row.get("task_error"):
-                        phase_str += " · 任务待补齐"
-                elif is_live:
-                    phase_str = row["phase"] + (f" ({live_dur})" if live_dur else "")
-                else:
-                    phase_str = row["phase"]
+                phase_str = phase_label(row)
+                if row.get("task_error") and row.get("active"):
+                    phase_str += " · 任务待确认"
                 if is_live:
                     row_tags = ("live",)
                 elif idx % 2 == 1:
@@ -480,7 +467,7 @@ class TrayUI:
             suffix = (
                 " · 自动恢复时间 " + time.strftime("%H:%M:%S", time.localtime(until))
                 if until
-                else " · 点击下方“解除异常暂停”按钮"
+                else " · 点击状态栏“解除异常暂停”按钮"
             )
             self.footer.set(hold["reason"] + suffix)
             return
@@ -490,7 +477,7 @@ class TrayUI:
             else "即将检查"
         )
         self.footer.set(
-            "暂停会停止全部挂机。双击表格行直接在浏览器打开直播间，右键可进行补齐操作。"
+            "监控已暂停"
             if snap["paused"]
-            else f"下次检查：{next_time} · 双击表格行直达直播间 · 悬停可查看任务详情。"
+            else f"下次检查：{next_time}"
         )

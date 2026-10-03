@@ -20,6 +20,7 @@ def main():
         initialize(root, [{"name": "测试主播", "room": 2, "uid": 1}])
         engine = Engine(root, job=Mock())
         with (
+            patch("desktop.avatars.load_avatar", return_value=__import__("PIL.Image", fromlist=["Image"]).new("RGB", (32,32), "green")),
             patch("desktop.view.pystray.Icon", return_value=Mock()),
             patch("urllib.request.urlopen", side_effect=AssertionError("network in UI smoke")),
             patch(
@@ -37,6 +38,32 @@ def main():
                 ui.refresh()
                 assert ui.tree.selection() == ("2",)
                 assert ui.tree.focus() == "2"
+                assert ui.workbench.detail_gain.master == ui.workbench.detail_medal.master
+                detail_children = ui.workbench.detail_frame.pack_slaves()
+                assert detail_children.index(ui.workbench.detail_medal) < detail_children.index(ui.workbench.detail_gain)
+                item = ui.tree.items["2"]
+                assert item["phase"].master == item["medal"].master == item["gain"].master
+                assert {item[key].grid_info()["row"] for key in ("phase", "medal", "gain")} == {0}
+                assert "双击" not in ui.footer.get() and "右键" not in ui.footer.get()
+                # Map real widgets at both supported sizes to catch clipping.
+                ui.rows_cache["2"].update(medal_name="同行者", intimacy_gain=9)
+                values = list(item["values"])
+                values[2], values[4] = "同行者 Lv.9", "挂机中·42分钟"
+                ui.tree.item("2", values=tuple(values))
+                ui.root.deiconify()
+                for width, height in ((1180, 760), (980, 620)):
+                    ui.root.geometry(f"{ui.px(width)}x{ui.px(height)}")
+                    ui.root.update()
+                    for key in ("phase", "medal", "gain"):
+                        widget = item[key]
+                        assert widget.winfo_width() >= widget.winfo_reqwidth(), (key, width)
+                    actions = ui.workbench.detail_actions
+                    for button in actions.pack_slaves():
+                        assert button.winfo_height() >= button.winfo_reqheight()
+                        assert button.winfo_y() + button.winfo_height() <= actions.winfo_height()
+                        assert button.winfo_x() + button.winfo_width() <= actions.winfo_width()
+                    assert actions.winfo_y() + actions.winfo_height() <= ui.workbench.detail_outer.winfo_height()
+                ui.root.withdraw()
                 engine.safety = {"blocked": True, "kind": "review", "reason": "测试账号保护暂停"}
                 ui.refresh()
                 assert "测试账号保护暂停" in ui.footer.get()

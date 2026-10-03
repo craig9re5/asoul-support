@@ -115,24 +115,8 @@ def build_table(self, body, p):
     self.tree.bind("<Delete>", lambda _: self.on_remove_member())
     self.tree.bind("<BackSpace>", lambda _: self.on_remove_member())
     self.tooltip = Tooltip(self.tree, lambda iid: self.rows_cache.get(iid), px=p)
-    self.menu = tk.Menu(
-        self.root,
-        tearoff=0,
-        font=(FONT_FAMILY, 10),
-        bg=BG_CARD,
-        fg=TEXT_MAIN,
-        activebackground="#e0f2fe",
-        activeforeground="#0369a1",
-    )
-    self.menu.add_command(label="🌐 打开直播间 (默认浏览器)", command=self.on_open_room)
-    self.menu.add_separator()
-    self.menu.add_command(label="💬 补齐弹幕任务", command=lambda: self.on_redo_task("danmaku"))
-    self.menu.add_command(label="👍 补做点赞任务", command=lambda: self.on_redo_task("like"))
-    self.menu.add_command(label="🔄 重新执行全部任务", command=lambda: self.on_redo_task("all"))
-    self.menu.add_command(label="🏅 佩戴该主播勋章", command=self.on_wear_medal)
-    self.menu.add_separator()
-    self.menu.add_command(label="❌ 从关注列表中移除", command=self.on_remove_member)
-    self.tree.bind("<Button-3>", self.on_right_click)
+    build_room_menu(self)
+
 
 
 def build_controls(self, body, p):
@@ -180,3 +164,24 @@ def build_controls(self, body, p):
             for label in (self.summary_label, self.footer_label)
         ],
     )
+
+
+def build_room_menu(self):
+    self.menu = tk.Menu(
+        self.root,
+        tearoff=0,
+        font=(FONT_FAMILY, 10),
+        bg=BG_CARD,
+        fg=TEXT_MAIN,
+        activebackground="#e0f2fe",
+        activeforeground="#0369a1",
+    )
+    self.menu.add_command(label="🌐 打开直播间 (默认浏览器)", command=self.on_open_room)
+    self.menu.add_separator()
+    self.menu.add_command(label="💬 补齐弹幕任务", command=lambda: self.on_redo_task("danmaku"))
+    self.menu.add_command(label="👍 补做点赞任务", command=lambda: self.on_redo_task("like"))
+    self.menu.add_command(label="🔄 重新执行全部任务", command=lambda: self.on_redo_task("all"))
+    self.menu.add_command(label="🏅 佩戴该主播勋章", command=self.on_wear_medal)
+    self.menu.add_separator()
+    self.menu.add_command(label="❌ 从关注列表中移除", command=self.on_remove_member)
+    self.tree.bind("<Button-3>", self.on_right_click)

@@ -264,6 +264,7 @@ def check_live_status(room_ids, sessdata, bili_jct):
                     "title": info.get("title", ""),
                     "area_name": info.get("area_v2_name", ""),
                     "live_time": info.get("live_time", ""),
+                    "face": info.get("face", ""),
                 }
     for room in room_ids:
         if room not in result:
@@ -375,7 +376,7 @@ def get_my_medals(sessdata, bili_jct):
                 "medal_id": info.get("medal_id"),
                 "medal_name": info.get("medal_name", ""),
                 "level": info.get("level", 0),
-                "today_intimacy": info.get("today_feed", info.get("today_intimacy", 0)),
+                "today_intimacy": info.get("today_feed", info.get("today_intimacy")),
                 "day_limit": info.get("day_limit", 0),
                 "is_lighted": info.get("is_lighted", 0),
             }

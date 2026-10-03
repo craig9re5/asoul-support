@@ -1,0 +1,171 @@
+"""Scrollable room cards with the selection/item contract used by desktop actions."""
+
+import tkinter as tk
+from .avatars import round_avatar
+from .presentation import gain_label
+from .widgets import FONT_FAMILY
+
+BACKGROUND = "#ffffff"
+SELECTED = "#edf3f1"
+INK = "#253638"
+MUTED = "#657477"
+
+
+class RoomList(tk.Frame):
+    def __init__(self, parent, ui):
+        super().__init__(parent, bg=BACKGROUND, takefocus=True)
+        self.ui, self.items, self.order = ui, {}, []
+        self.selected, self.focused = "", ""
+        self.canvas = tk.Canvas(self, bg=BACKGROUND, highlightthickness=0)
+        scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.content = tk.Frame(self.canvas, bg=BACKGROUND)
+        self.window = self.canvas.create_window(0, 0, window=self.content, anchor="nw")
+        self.content.bind("<Configure>", lambda _: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.bind("<Configure>", self._resize)
+        self.bind("<Return>", lambda _: ui.on_open_room())
+        self.bind("<Delete>", lambda _: ui.on_remove_member())
+        self.bind("<Up>", lambda _: self._step(-1))
+        self.bind("<Down>", lambda _: self._step(1))
+
+    def _resize(self, event):
+        self.canvas.itemconfigure(self.window, width=event.width)
+        for item in self.items.values():
+            item["title"].configure(wraplength=max(100, event.width - self.ui.px(85)))
+
+    def _step(self, step):
+        if not self.order:
+            return
+        current = self.order.index(self.selected) if self.selected in self.order else 0
+        self.selection_set(self.order[min(len(self.order) - 1, max(0, current + step))])
+        self.focused = self.selected
+
+    def _pick(self, iid):
+        self.selection_set(iid)
+        self.focused = iid
+        self.focus_set()
+
+    def _context(self, iid, event):
+        self._pick(iid)
+        if iid != "_empty":
+            self.ui.menu.post(event.x_root, event.y_root)
+
+    def _wheel(self, event):
+        self.canvas.yview_scroll(-int(event.delta / 120), "units")
+        return "break"
+
+    def get_children(self):
+        return tuple(self.order)
+
+    def exists(self, iid):
+        return iid in self.items
+
+    def selection(self):
+        return (self.selected,) if self.selected else ()
+
+    def selection_set(self, iid):
+        if isinstance(iid, (list, tuple)):
+            iid = iid[0] if iid else ""
+        self.selected = iid if iid in self.items else ""
+        for key in self.items:
+            self._paint(key)
+        self.event_generate("<<TreeviewSelect>>")
+
+    def selection_remove(self, _):
+        self.selection_set("")
+
+    def focus(self, iid=None):
+        if iid is not None:
+            self.focused = iid
+        return self.focused
+
+    def identify_row(self, y):
+        for iid, item in self.items.items():
+            top = item["frame"].winfo_rooty() - self.winfo_rooty()
+            if top <= y < top + item["frame"].winfo_height():
+                return iid
+        return ""
+
+    def insert(self, _parent, _position, *, iid, values, tags=()):
+        p = self.ui.px
+        frame = tk.Frame(self.content, bg=BACKGROUND, padx=p(16), pady=p(12))
+        frame.pack(fill="x")
+        frame.columnconfigure(1, weight=1)
+        avatar = tk.Label(frame, text="", bg=SELECTED, fg=MUTED, width=3,
+                          font=(FONT_FAMILY, 14), anchor="center")
+        avatar.grid(row=0, column=0, rowspan=3, padx=(0, p(12)), sticky="n")
+        labels = {}
+        for name, row, size, color in (("name", 0, 11, INK), ("title", 1, 9, MUTED)):
+            label = tk.Label(frame, bg=BACKGROUND, fg=color, anchor="w", justify="left",
+                             font=(FONT_FAMILY, size, "bold" if name == "name" else "normal"))
+            label.grid(row=row, column=1, sticky="ew", pady=(p(3), 0))
+            labels[name] = label
+        metadata = tk.Frame(frame, bg=BACKGROUND)
+        metadata.grid(row=2, column=1, sticky="ew", pady=(p(6), 0))
+        for column, (name, color) in enumerate((("phase", MUTED), ("medal", INK), ("gain", "#2d6763"))):
+            metadata.columnconfigure(column, weight=1)
+            labels[name] = tk.Label(metadata, bg=BACKGROUND, fg=color,
+                                    anchor="e" if name == "gain" else "w", font=(FONT_FAMILY, 9))
+            labels[name].grid(row=0, column=column, sticky="ew", padx=(0, p(8) if column < 2 else 0))
+        line = tk.Frame(frame, height=1, bg="#e2e8e6")
+        line.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(p(10), 0))
+        self.items[iid] = {"frame": frame, "avatar": avatar, "metadata": metadata,
+                           "values": values, "tags": tags, **labels}
+        self.order.append(iid)
+        for widget in (frame, avatar, metadata, *labels.values()):
+            widget.bind("<Button-1>", lambda _, key=iid: self._pick(key))
+            widget.bind("<Double-1>", lambda _, key=iid: (self._pick(key), self.ui.on_open_room()))
+            widget.bind("<Button-3>", lambda event, key=iid: self._context(key, event))
+            widget.bind("<MouseWheel>", self._wheel)
+        self.item(iid, values=values, tags=tags)
+        return iid
+
+    def _paint(self, iid):
+        item = self.items[iid]
+        bg = SELECTED if iid == self.selected else BACKGROUND
+        for key in ("frame", "name", "title", "metadata", "phase", "medal", "gain"):
+            item[key].configure(bg=bg)
+        if item.get("photo"):
+            item["avatar"].configure(bg=bg)
+
+    def item(self, iid, **changes):
+        item = self.items[iid]
+        item.update(changes)
+        if not changes:
+            return {"values": item["values"], "tags": item["tags"]}
+        values = item["values"]
+        row = self.ui.rows_cache.get(iid, {})
+        item["name"].configure(text=values[0])
+        item["title"].configure(text=values[1])
+        item["phase"].configure(text=values[4])
+        item["medal"].configure(text=values[2].split("\n")[0])
+        item["gain"].configure(text=gain_label(row) if row.get("medal_name") else "")
+        if not item.get("photo"):
+            item["avatar"].configure(text=row.get("name", "?")[:1])
+        self._paint(iid)
+
+    def set_avatar(self, iid, image):
+        from PIL import ImageTk
+        if iid not in self.items:
+            return
+        item = self.items[iid]
+        photo = ImageTk.PhotoImage(round_avatar(image, self.ui.px(40)), master=self.ui.root)
+        item["photo"] = photo
+        item["avatar"].configure(image=photo, text="", width=0, bg=item["frame"].cget("bg"))
+
+    def delete(self, iid):
+        self.items.pop(iid)["frame"].destroy()
+        self.order.remove(iid)
+        if self.selected == iid:
+            self.selected = ""
+
+    def move(self, iid, _parent, index):
+        if self.order[index] == iid:
+            return
+        self.order.remove(iid)
+        self.order.insert(index, iid)
+        for key in self.order:
+            self.items[key]["frame"].pack_forget()
+            self.items[key]["frame"].pack(fill="x")
