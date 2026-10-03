@@ -1,3 +1,4 @@
+from desktop.health import check_progress, recovery_delay, number
 from desktop.snapshot import project_snapshot
 from asoul_support.application import AppContext
 import logging
@@ -30,6 +31,13 @@ class Engine:
         self.stopping = threading.Event()
         self.job = job if job is not None else Job()
         self.workers = {}
+        self.worker_health = {}
+        self.worker_retries = {}
+        self.started_at = time.time()
+        self.last_tick = 0
+        self.last_status_publish = 0
+        self.publish_error = ""
+        self.state_errors = {}
         self.probe = None
         self.probe_path = None
         self.probe_started = 0
@@ -95,6 +103,7 @@ class Engine:
                 self.medals, self.tasks, self.statuses = ({}, {}, {})
                 self.status_times, self.status_errors, self.task_errors = ({}, {}, {})
             keep = {m["room"] for m in members}
+            self.worker_retries = {room: retry for room, retry in self.worker_retries.items() if room in keep}
             for room in list(self.workers):
                 if room not in keep:
                     proc = self.workers.pop(room)
@@ -144,10 +153,17 @@ class Engine:
             except (OSError, ValueError, TimeoutError):
                 logging.exception("Cannot record worker interruption")
         self.workers.clear()
+        self.worker_health.clear()
         self.probe = None
 
-    def _record_interruption(self, room, reason):
-        state = read_json(self.root / "state" / f"{room}.json", {})
+    def _record_interruption(self, room, reason, expected_pid=None):
+        try:
+            state = read_json(self.root / "state" / f"{room}.json", {})
+        except (OSError, ValueError):
+            logging.warning("Cannot read interrupted room state room=%s", room)
+            return
+        if not isinstance(state, dict) or (expected_pid is not None and state.get("pid") != expected_pid):
+            return
         session_id = state.get("session_id")
         if session_id and (not state.get("result")):
             append_event(
@@ -159,7 +175,7 @@ class Engine:
                     "room": room,
                     "member": state.get("name", str(room)),
                     "stopped_reason": reason,
-                    "minutes": max(0, int((time.time() - state.get("started", time.time())) / 60)),
+                    "minutes": max(0, int((time.time() - number(state.get("started"), time.time())) / 60)),
                     "beats_ok": state.get("beats", 0),
                     "success": False,
                 },
@@ -204,16 +220,102 @@ class Engine:
         if self.thread.is_alive():
             self.thread.join(timeout=5)
 
+    def _read_room_state(self, room):
+        try:
+            value = read_json(self.root / "state" / f"{room}.json", {})
+            if not isinstance(value, dict):
+                raise ValueError("Room state must be an object")
+        except (OSError, ValueError) as exc:
+            error = type(exc).__name__
+            if self.state_errors.get(room) != error:
+                logging.warning("Room state unreadable room=%s error=%s", room, error)
+            self.state_errors[room] = error
+            return {"state_error": "房间状态无法读取，等待重新发布"}
+        self.state_errors.pop(room, None)
+        health = self.worker_health.get(room)
+        if health and value.get("pid") != health["pid"]:
+            return {"state_error": "等待当前进程发布状态", "started": self.started_at}
+        return value
+
     def snapshot(self):
         with self.lock:
-            states = {
-                m["room"]: read_json(self.root / "state" / f"{m['room']}.json", {})
-                for m in self.members
-            }
-            return project_snapshot(self, states, time.time())
+            states = {m["room"]: self._read_room_state(m["room"]) for m in self.members}
+            result = project_snapshot(self, states, time.time())
+            if self.publish_error:
+                result["error"] = "运行快照发布失败：" + self.publish_error
+            return result
 
     def persist(self, exited=False):
         write_json(self.root / "status.json", {**self.snapshot(), "exited": exited})
+        self.last_status_publish = time.time()
+
+    def cycle(self):
+        """A publish failure must not disable scheduling or erase its diagnostics."""
+        try:
+            self.tick()
+            self.last_tick = time.time()
+        except Exception as exc:
+            logging.exception("Monitor cycle failed")
+            self.error = f"配置或运行错误：{type(exc).__name__}"
+            self.next_check = time.time() + 60
+        try:
+            # Recovery clears the previous publication error only after an actual write.
+            snapshot = self.snapshot()
+            snapshot["error"] = self.error
+            write_json(self.root / "status.json", {**snapshot, "exited": False})
+            self.last_status_publish = time.time()
+            self.publish_error = ""
+        except Exception as exc:
+            error = type(exc).__name__
+            if error != self.publish_error:
+                logging.exception("Status publication failed")
+            self.publish_error = error
+        try:
+            write_json(self.root / "monitor-health.json", {
+                "pid": os.getpid(), "started": self.started_at, "updated": time.time(),
+                "last_tick": self.last_tick, "last_status_publish": self.last_status_publish,
+                "publish_error": self.publish_error,
+            })
+        except OSError:
+            logging.warning("Cannot publish monitor health")
+
+    def _watch_workers(self, now):
+        clock = time.monotonic()
+        for room, proc in list(self.workers.items()):
+            if proc.poll() is not None:
+                self._record_interruption(room, "worker_exited")
+                del self.workers[room]
+                self.worker_health.pop(room, None)
+                self.next_check = min(self.next_check, now + 300)
+                continue
+            state = self._read_room_state(room)
+            record = self.worker_health.setdefault(room, {
+                "pid": proc.pid, "started": clock, "progress": clock,
+            })
+            if not check_progress(state, record, clock):
+                if state.get("pid") == proc.pid and number(state.get("beats")) >= 5:
+                    self.worker_retries.pop(room, None)
+                continue
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+            del self.workers[room]
+            self.worker_health.pop(room, None)
+            attempt = self.worker_retries.get(room, {}).get("attempt", 0) + 1
+            delay = recovery_delay(attempt)
+            self.worker_retries[room] = {"attempt": attempt, "until": clock + delay}
+            self._record_interruption(room, "worker_timeout", expected_pid=proc.pid)
+            append_event(self.root / "logs/activity.jsonl", {
+                "type": "worker_recovery", "room": room, "attempt": attempt,
+                "delay": delay, "reason": "progress_timeout",
+            })
+            self.next_check = min(self.next_check, now + delay)
+        for room, retry in self.worker_retries.items():
+            if room not in self.workers and self.probe is None:
+                self.next_check = min(self.next_check, now + max(0, retry["until"] - clock))
 
     def tick(self):
         self.reload_settings()
@@ -233,11 +335,7 @@ class Engine:
             self.next_check = self.safety.get("until") or now + 300
             self.force_probe = False
             return
-        for room, proc in list(self.workers.items()):
-            if proc.poll() is not None:
-                self._record_interruption(room, "worker_exited")
-                del self.workers[room]
-                self.next_check = min(self.next_check, now + 300)
+        self._watch_workers(now)
         if self.probe:
             if self.probe.poll() is None and now - self.probe_started > 180:
                 self.probe.kill()
@@ -263,18 +361,14 @@ class Engine:
     def run(self):
         while not self.stopping.is_set():
             with self.lock:
-                try:
-                    self.tick()
-                    self.persist()
-                except Exception as exc:
-                    logging.exception("Monitor cycle failed")
-                    self.error = f"配置或运行错误：{exc}"
-                    self.next_check = time.time() + 60
+                self.cycle()
             self.stopping.wait(1)
 
     def _apply_probe(self, result, now):
         self.error = result.get("error") or result.get("warning", "")
         if "statuses" not in result:
+            for retry in self.worker_retries.values():
+                retry["until"] = max(retry["until"], time.monotonic() + 300)
             self.error = self.error or "检查进程未返回结果，请查看日志。"
             self.status_errors = {str(m["room"]): self.error for m in self.members}
             if result.get("auth_invalid"):
@@ -303,6 +397,12 @@ class Engine:
         for member in self.members:
             key = str(member["room"])
             status = received.get(key)
+            if status and status.get("live_status") in (0, 2):
+                self.worker_retries.pop(member["room"], None)
+            elif not status or status.get("live_status") not in (0, 1, 2):
+                retry = self.worker_retries.get(member["room"])
+                if retry:
+                    retry["until"] = max(retry["until"], time.monotonic() + 300)
             if status and status.get("live_status") == 1:
                 if member["room"] not in self.known_live:
                     self.known_live.add(member["room"])
@@ -319,6 +419,11 @@ class Engine:
                 and status
                 and (status.get("live_status") == 1)
                 and (member["room"] not in self.workers)
+                and time.monotonic() >= self.worker_retries.get(member["room"], {}).get("until", 0)
             ):
                 args = ["--worker", key]
-                self.workers[member["room"]] = self.spawn(*args)
+                proc = self.spawn(*args)
+                self.workers[member["room"]] = proc
+                self.worker_health[member["room"]] = {
+                    "pid": proc.pid, "started": time.monotonic(), "progress": time.monotonic(),
+                }

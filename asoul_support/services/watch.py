@@ -400,6 +400,7 @@ class HeartbeatChain:
 
 
 def _check_tasks(task_runner, room_id, _gateway):
+    _gateway._log({"type": "task_check_start", "room_id": room_id})
     try:
         result = task_runner.check()
         if not result["success"]:
@@ -409,3 +410,5 @@ def _check_tasks(task_runner, room_id, _gateway):
             print("    ⚠️  " + "；".join((e for e in errors if e)), file=sys.stderr)
     except Exception as exc:
         _gateway._log({"type": "task_check_error", "room_id": room_id, "error": type(exc).__name__})
+    finally:
+        _gateway._log({"type": "task_check_end", "room_id": room_id})

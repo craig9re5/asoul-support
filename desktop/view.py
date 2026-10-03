@@ -1,6 +1,7 @@
 from .tray_layout import configure_table_style, build_header, build_table, build_controls
 from desktop.dispatch import Dispatcher
 import os
+import logging
 import queue
 import threading
 import time
@@ -31,6 +32,7 @@ class TrayUI:
 
             ctypes.windll.user32.SetProcessDPIAware()
         self.root = tk.Tk()
+        self.root.report_callback_exception = self._callback_error
         self.engine.dispatcher = Dispatcher(self.root)
         self.root.bind(
             "<<BackgroundActionFailed>>",
@@ -213,17 +215,27 @@ class TrayUI:
         self.engine.application.remove_member(room_id)
         self.commands.put("check")
 
+    def _callback_error(self, kind, value, traceback):
+        logging.error("Tk callback failed", exc_info=(kind, value, traceback))
+        self.summary.set("界面操作异常，已记录日志；后台监控继续运行")
+
     def refresh(self):
         if self.closed:
             return
-        self._read_commands()
-        if self.closed:
-            return
-        snap = self.engine.snapshot()
-        self._render_overview(snap)
-        self._render_rows(snap)
-        self._render_footer(snap)
-        self.root.after(1000, self.refresh)
+        try:
+            self._read_commands()
+            if self.closed:
+                return
+            snap = self.engine.snapshot()
+            self._render_overview(snap)
+            self._render_rows(snap)
+            self._render_footer(snap)
+        except Exception:
+            logging.exception("Desktop refresh failed")
+            self.summary.set("界面刷新失败，稍后自动重试；请查看日志")
+        finally:
+            if not self.closed:
+                self.root.after(1000, self.refresh)
 
     def run(self):
         try:
@@ -238,10 +250,18 @@ class TrayUI:
         for path in (self.engine.root / "commands").glob("*.json"):
             try:
                 request = read_json(path, {})
-                if time.time() - request.get("created", 0) < 60:
+                if not isinstance(request, dict):
+                    raise ValueError("Command must be an object")
+                age = time.time() - request.get("created", 0)
+                if 0 <= age < 60:
                     self.commands.put(request.get("command"))
+            except (OSError, ValueError, TypeError):
+                logging.warning("Ignoring unreadable desktop command")
             finally:
-                path.unlink(missing_ok=True)
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    logging.warning("Cannot remove processed desktop command")
         while not self.commands.empty():
             cmd = self.commands.get_nowait()
             if isinstance(cmd, tuple):

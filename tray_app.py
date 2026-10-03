@@ -62,6 +62,7 @@ def main():
     stream = log_path.open("a", encoding="utf-8", buffering=1)
     sys.stdout = sys.stderr = SafeStream(stream)
     logging.basicConfig(
+        force=True,
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
         handlers=[

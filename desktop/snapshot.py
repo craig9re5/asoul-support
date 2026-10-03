@@ -1,3 +1,4 @@
+from desktop.health import number, heartbeat_timeout
 import os
 import time
 from asoul_support.runtime import APP_VERSION, task_day
@@ -68,9 +69,9 @@ def project_row(engine, member, state, now):
         else ""
     )
     active = room in engine.workers and engine.workers[room].poll() is None
-    heartbeat_stale = active and now - state.get("last_heartbeat", state.get("started", now)) > max(
-        180, state.get("interval", 60) * 2 + 90
-    )
+    heartbeat_stale = active and now - number(
+        state.get("last_heartbeat"), number(state.get("started"), now)
+    ) > heartbeat_timeout(state)
     phase = (
         "心跳已过期，等待恢复"
         if heartbeat_stale
@@ -100,6 +101,9 @@ def project_row(engine, member, state, now):
             )
         )
     )
+    if state.get("state_error"):
+        phase = "状态记录异常"
+        task_error = state["state_error"]
     safety = getattr(engine, "safety", {})
     if safety.get("blocked"):
         phase = "账号保护暂停"

@@ -57,6 +57,11 @@ class RoomStateRecorder:
                 phase="正在重试",
                 error=str(event.get("message", event.get("error", "请求失败")))[:180],
             )
+        elif kind == "task_check_start":
+            self.state.update(phase="执行任务中", task_started=time.time())
+        elif kind in ("task_check_end", "task_check_error"):
+            self.state.update(phase="挂机中" if self.state.get("last_heartbeat") else "正在连接")
+            self.state.pop("task_started", None)
         elif kind == "watch_start":
             self.state.update(
                 session_id=event.get("session_id"),
