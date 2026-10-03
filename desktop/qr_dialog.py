@@ -10,23 +10,16 @@ from asoul_support.qr_login import QrLoginSession, POLL_INTERVAL
 from .widgets import BG_WINDOW, TEXT_MAIN, TEXT_MUTED, FONT_FAMILY, ModernButton, center_window
 
 
-class QrLoginDialog(tk.Toplevel):
-    def __init__(self, parent, engine, px, on_login, session_factory=QrLoginSession):
-        super().__init__(parent)
+class QrSessionView:
+    """Shared cancellable QR session; widgets are updated on the Tk thread."""
+
+    def build_content(self, engine, px, on_login, session_factory):
         self.engine, self.px, self.on_login = engine, px, on_login
         self.session_factory = session_factory
         self.cancelled = threading.Event()
         self.closed = False
-        self.title("B 站扫码登录 · LiveSupport")
         self.configure(bg=BG_WINDOW)
-        w, h = px(410), px(500)
-        self.geometry(f"{w}x{h}")
-        self.resizable(False, False)
-        self.transient(parent)
-        self.grab_set()
-        self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<Destroy>", self.on_destroy)
-        center_window(self, parent, w, h, px)
         tk.Label(
             self,
             text="使用 B 站 App 扫码登录",
@@ -150,5 +143,27 @@ class QrLoginDialog(tk.Toplevel):
         self.cancelled.set()
         self.qr_image = None
         self.destroy()
-        if self.master.winfo_exists():
+        if isinstance(self, tk.Toplevel) and isinstance(self.master, tk.Toplevel) and self.master.winfo_exists():
             self.master.grab_set()
+
+
+class QrLoginPanel(QrSessionView, tk.Frame):
+    def __init__(self, parent, engine, px, on_login, session_factory=QrLoginSession):
+        tk.Frame.__init__(self, parent, bg=BG_WINDOW)
+        self.build_content(engine, px, on_login, session_factory)
+        ModernButton(self, text="取消扫码", command=self.close, px=px).pack(pady=(0,px(8)))
+
+
+class QrLoginDialog(QrSessionView, tk.Toplevel):
+    """Compatibility host; workbench account pages use QrLoginPanel."""
+    def __init__(self, parent, engine, px, on_login, session_factory=QrLoginSession):
+        tk.Toplevel.__init__(self, parent)
+        self.title("B 站扫码登录 · LiveSupport")
+        w, h = px(410), px(500)
+        self.geometry(f"{w}x{h}")
+        self.resizable(False,False)
+        self.transient(parent.winfo_toplevel())
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self.close)
+        center_window(self, parent.winfo_toplevel(), w, h, px)
+        self.build_content(engine, px, on_login, session_factory)

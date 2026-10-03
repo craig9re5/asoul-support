@@ -6,6 +6,7 @@ from .avatars import AvatarLoader
 from .room_list import RoomList
 from .presentation import phase_label, gain_label
 from .widgets import ModernButton, FONT_FAMILY
+from .dialogs import SettingsPanel
 
 BG = "#f5f6f5"
 INK = "#253638"
@@ -24,6 +25,7 @@ class Workbench:
         self.ui = ui
         self.loader = AvatarLoader(ui.engine.root, ui.engine.dispatcher)
         self.photos, self.snap = {}, {"rows": []}
+        self.page, self.settings_pages = "monitor", {}
         p = ui.px
         shell = tk.Frame(ui.root, bg=BG)
         shell.pack(fill="both", expand=True)
@@ -31,7 +33,7 @@ class Workbench:
         side.pack(side="left", fill="y")
         side.pack_propagate(False)
         label(side, "LiveSupport", size=16, color="#e5eeeb", bg=SIDE, bold=True).pack(anchor="w", pady=(0,p(35)))
-        for text, command in (("监控总览", ui.show),
+        for text, command in (("监控总览", lambda: self.show_page("monitor")),
                               ("活动记录", lambda: os.startfile(str(ui.engine.root / "logs"))),
                               ("自动化设置", ui.open_settings), ("账号管理", lambda: ui.open_settings(focus_auth=True))):
             button = tk.Button(side, text=text, command=command, bg=SIDE, fg="#c0ceca",
@@ -106,6 +108,34 @@ class Workbench:
         ModernButton(action, text="打开直播间", command=ui.on_open_room, px=p).pack(side="left")
         self.redo_button = ModernButton(action, text="补齐任务", command=lambda: ui.on_redo_task("all"), px=p)
         self.redo_button.pack(side="left", padx=(p(8),0))
+        self.settings_host = tk.Frame(self.body, bg=BG)
+
+    def show_page(self, page):
+        if page not in ("monitor", "automation", "account"):
+            raise ValueError("Unknown workbench page")
+        previous = self.settings_pages.get(self.page)
+        if previous and self.page != page:
+            previous.deactivate()
+            previous.pack_forget()
+        self.page = page
+        if page == "monitor":
+            self.settings_host.pack_forget()
+            self.toolbar.pack(fill="x", pady=(0,self.ui.px(10)))
+            self.footer_bar.pack(side="bottom", fill="x", pady=(self.ui.px(8),0))
+            self.area.pack(fill="both", expand=True)
+            self.heading.configure(text="监控总览")
+            return None
+        self.toolbar.pack_forget()
+        self.footer_bar.pack_forget()
+        self.area.pack_forget()
+        self.settings_host.pack(fill="both", expand=True)
+        if page not in self.settings_pages:
+            self.settings_pages[page] = SettingsPanel(self.settings_host, self.ui.engine, self.ui.px,
+                                                     lambda: self.ui.commands.put("check"), scope=page)
+        panel = self.settings_pages[page]
+        panel.pack(fill="both", expand=True)
+        self.heading.configure(text="自动化设置" if page == "automation" else "账号管理")
+        return panel
 
     def _build_toolbar(self):
         ui, p = self.ui, self.ui.px

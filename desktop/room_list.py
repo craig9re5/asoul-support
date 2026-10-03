@@ -45,6 +45,12 @@ class RoomList(tk.Frame):
         title_font = tkfont.Font(font=item["title"].cget("font"))
         item["title"].configure(text=self._elide(item.get("title_text", ""), title_font,
                                                available - name_font.measure(name) - self.ui.px(10)))
+        column_width = max(1, available // 3)
+        for column in range(3):
+            item["metadata"].columnconfigure(column, minsize=column_width, weight=1, uniform="metadata")
+        for key, text in item.get("metadata_text", {}).items():
+            font = tkfont.Font(font=item[key].cget("font"))
+            item[key].configure(text=self._elide(text, font, column_width - self.ui.px(8)))
 
     @staticmethod
     def _elide(text, font, width):
@@ -121,7 +127,8 @@ class RoomList(tk.Frame):
         frame.pack(fill="x")
         frame.grid_propagate(False)
         frame.columnconfigure(1, weight=1)
-        avatar = tk.Label(frame, text="", bg=SELECTED, fg=MUTED, width=3,
+        frame.columnconfigure(0, minsize=p(42))
+        avatar = tk.Label(frame, text="", bg=SELECTED, fg=MUTED, width=0,
                           font=(FONT_FAMILY, 12), anchor="center")
         avatar.grid(row=0, column=0, rowspan=2, padx=(0, p(10)), sticky="n")
         headline = tk.Frame(frame, bg=BACKGROUND)
@@ -129,16 +136,16 @@ class RoomList(tk.Frame):
         headline.columnconfigure(1, weight=1)
         labels = {}
         for column, (name, size, color) in enumerate((("name", 10, INK), ("title", 9, MUTED))):
-            label = tk.Label(headline, bg=BACKGROUND, fg=color, anchor="w", justify="left", padx=0, pady=0,
+            label = tk.Label(headline, bg=BACKGROUND, fg=color, anchor="e" if name == "title" else "w", justify="left", padx=0, pady=0,
                              font=(FONT_FAMILY, size, "bold" if name == "name" else "normal"))
             label.grid(row=0, column=column, sticky="ew", padx=(0, p(8) if column == 0 else 0))
             labels[name] = label
         metadata = tk.Frame(frame, bg=BACKGROUND)
         metadata.grid(row=1, column=1, sticky="ew", pady=(p(3), 0))
         for column, (name, color) in enumerate((("phase", MUTED), ("medal", INK), ("gain", "#2d6763"))):
-            metadata.columnconfigure(column, weight=1)
+            metadata.columnconfigure(column, weight=1, uniform="metadata")
             labels[name] = tk.Label(metadata, bg=BACKGROUND, fg=color,
-                                    anchor="e" if name == "gain" else "w", font=(FONT_FAMILY, 9), padx=0, pady=0)
+                                    anchor="e" if name == "gain" else "w", font=(FONT_FAMILY, 9), width=1, padx=0, pady=0)
             labels[name].grid(row=0, column=column, sticky="ew", padx=(0, p(8) if column < 2 else 0))
         line = tk.Frame(frame, height=1, bg="#e2e8e6")
         line.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(p(8), 0))
@@ -170,10 +177,9 @@ class RoomList(tk.Frame):
         row = self.ui.rows_cache.get(iid, {})
         item["name_text"] = row.get("name") or values[0]
         item["title_text"] = values[1]
+        item["metadata_text"] = {"phase": values[4], "medal": values[2].split("\n")[0],
+                                 "gain": gain_label(row) if row.get("medal_name") else ""}
         self._fit_headline(item, self.canvas.winfo_width())
-        item["phase"].configure(text=values[4])
-        item["medal"].configure(text=values[2].split("\n")[0])
-        item["gain"].configure(text=gain_label(row) if row.get("medal_name") else "")
         if not item.get("photo"):
             item["avatar"].configure(text=row.get("name", "?")[:1])
         self._paint(iid)

@@ -19,14 +19,14 @@ def format_task_result(name, result):
     return f"【{name}】任务未完成：{detail}"
 
 
-BG_WINDOW = "#f8fafc"
+BG_WINDOW = "#f5f6f5"
 BG_CARD = "#ffffff"
 BORDER_CARD = "#e2e8f0"
 BORDER_LIGHT = "#f1f5f9"
-TEXT_MAIN = "#0f172a"
-TEXT_MUTED = "#64748b"
-ACCENT_GREEN = "#10b981"
-ACCENT_GREEN_HOVER = "#059669"
+TEXT_MAIN = "#253638"
+TEXT_MUTED = "#657477"
+ACCENT_GREEN = "#2d6763"
+ACCENT_GREEN_HOVER = "#245550"
 ACCENT_BLUE = "#3b82f6"
 ACCENT_BLUE_HOVER = "#2563eb"
 BTN_BG = "#f1f5f9"
@@ -77,7 +77,7 @@ def format_task_mini_badge(tasks, is_lighted=1, has_medal=True):
 
 
 class ModernButton(tk.Button):
-    """现代无边框/圆角交互按钮，带平滑鼠标悬停效果"""
+    """Native keyboard/accessibility behavior with rounded bitmap backgrounds."""
 
     def __init__(
         self,
@@ -94,49 +94,79 @@ class ModernButton(tk.Button):
         self.primary = primary
         self.accent = accent
         self.accent_hover = accent_hover
-        if primary:
-            bg = self.accent
-            fg = "#ffffff"
-            active_bg = self.accent_hover
-            border_color = self.accent
-            hl_thick = 0
-        else:
-            bg = BTN_BG
-            fg = BTN_FG
-            active_bg = BTN_BG_HOVER
-            border_color = BORDER_CARD
-            hl_thick = 1
+        self.px = p
+        self.hovered = self.focused = False
+        self._fills = (self.accent, self.accent_hover) if primary else (BTN_BG, BTN_BG_HOVER)
         font = (FONT_FAMILY, 9, "bold" if primary else "normal")
         super().__init__(
             parent,
             text=text,
             command=command,
-            bg=bg,
-            fg=fg,
-            activebackground=active_bg,
-            activeforeground=fg,
+            bg=parent.cget("bg"),
+            fg="#ffffff" if primary else BTN_FG,
+            activebackground=parent.cget("bg"),
+            activeforeground="#ffffff" if primary else BTN_FG,
+            disabledforeground="#89979a",
             relief="flat",
             bd=0,
-            highlightthickness=hl_thick,
-            highlightbackground=border_color,
+            highlightthickness=0,
             font=font,
             cursor="hand2",
-            padx=p(14),
-            pady=p(5),
+            padx=0,
+            pady=0,
+            compound="center",
+            takefocus=True,
             **kwargs,
         )
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
+        self.bind("<FocusIn>", lambda _: self._focus(True))
+        self.bind("<FocusOut>", lambda _: self._focus(False))
+        self._render_background()
+
+    def _focus(self, focused):
+        self.focused = focused
+        self._render_background()
+
+    def _render_background(self):
+        from tkinter import font as tkfont
+        from PIL import ImageTk
+        font = tkfont.Font(font=self.cget("font"))
+        size = (max(1, font.measure(self.cget("text"))) + self.px(28), font.metrics("linespace") + self.px(10))
+        self._photos = []
+        for fill in (*self._fills, "#e8eeec"):
+            picture = Image.new("RGBA", size)
+            draw = ImageDraw.Draw(picture)
+            draw.rounded_rectangle((0, 0, size[0]-1, size[1]-1), radius=self.px(8), fill=fill,
+                                   outline=self.accent if self.focused else (fill if self.primary else BORDER_CARD), width=1)
+            self._photos.append(ImageTk.PhotoImage(picture, master=self))
+        self._select_background()
+
+    def _select_background(self):
+        index = 2 if self.cget("state") == "disabled" else int(self.hovered)
+        super().configure(image=self._photos[index])
+
+    def configure(self, cnf=None, **kwargs):
+        options = {**(cnf or {}), **kwargs} if isinstance(cnf, (dict, type(None))) else kwargs
+        redraw = any(key in options and str(options[key]) != str(self.cget(key)) for key in ("text", "font"))
+        result = super().configure(cnf, **kwargs)
+        if redraw and hasattr(self, "_photos"):
+            self._render_background()
+        elif "state" in options and hasattr(self, "_photos"):
+            self._select_background()
+        return result
+
+    config = configure
 
     def _on_enter(self, _):
         if self.cget("state") == "disabled":
             return
-        self.configure(bg=self.accent_hover if self.primary else BTN_BG_HOVER)
+        self.hovered = True
+        super().configure(image=self._photos[1])
 
     def _on_leave(self, _):
-        if self.cget("state") == "disabled":
-            return
-        self.configure(bg=self.accent if self.primary else BTN_BG)
+        self.hovered = False
+        self._select_background()
 
 
 class ToggleSwitch(tk.Canvas):

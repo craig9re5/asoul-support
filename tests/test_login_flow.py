@@ -1,6 +1,8 @@
 """Credential validation and GUI login persistence without real account IO."""
 
 import json
+import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -9,6 +11,40 @@ from pathlib import Path
 from asoul_support.application import AppContext
 from asoul_support.credentials import parse_login_import
 from desktop.dialogs import SettingsDialog
+
+
+class ScopedSettingsTests(unittest.TestCase):
+    def test_automation_save_preserves_credentials_and_other_settings(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "settings.json").write_text(json.dumps({"paused": True, "unknown": 7}))
+            panel = SimpleNamespace(scope="automation", interval_var=Mock(), engine=Mock(root=root),
+                                    on_saved=Mock(), save_status=Mock())
+            panel.interval_var.get.return_value = "15"
+            for name in ("var_auto_revive", "var_auto_danmu", "var_auto_like", "var_notify", "var_autostart"):
+                setattr(panel, name, Mock())
+                getattr(panel, name).get.return_value = False
+            with patch("desktop.dialogs.save_login") as save, patch("desktop.dialogs.set_autostart", return_value=True):
+                SettingsDialog.do_save(panel)
+            save.assert_not_called()
+            config = json.loads((root / "settings.json").read_text())
+            self.assertTrue(config["paused"])
+            self.assertEqual(config["unknown"], 7)
+            self.assertEqual(config["check_minutes"], 15)
+            panel.engine.application.validate_credentials.assert_not_called()
+
+    def test_account_save_does_not_touch_automation_or_autostart(self):
+        panel = SimpleNamespace(scope="account", engine=Mock(root=Path("isolated-data")),
+                                sessdata_var=Mock(), jct_var=Mock(), verified_pair=("synthetic-session", "synthetic-csrf"),
+                                verified_at=time.monotonic(), on_saved=Mock(), save_status=Mock())
+        panel.sessdata_var.get.return_value = "synthetic-session"
+        panel.jct_var.get.return_value = "synthetic-csrf"
+        with patch("desktop.dialogs.save_login") as save, patch("desktop.dialogs.update_json") as settings, \
+             patch("desktop.dialogs.set_autostart") as autostart:
+            SettingsDialog.do_save(panel)
+        save.assert_called_once_with("synthetic-session", "synthetic-csrf", Path("isolated-data/credentials.json"))
+        settings.assert_not_called()
+        autostart.assert_not_called()
 
 
 class LoginImportTests(unittest.TestCase):

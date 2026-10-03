@@ -16,84 +16,67 @@ from asoul_support.runtime import update_json, save_login
 from .widgets import *
 
 
-class SettingsDialog(tk.Toplevel):
-    """现代卡片化系统设置面板"""
+class SettingsPanel(tk.Frame):
+    """Inline settings pages; automation and account writes are independently scoped."""
 
-    def __init__(self, parent, engine, px, on_saved, focus_auth=False):
-        super().__init__(parent)
-        self.engine = engine
-        self.px = px
-        self.on_saved = on_saved
-        p = self.px
-        self.title("LiveSupport 系统设置")
-        w, h = (p(580), p(630))
-        self.geometry(f"{w}x{h}")
-        self.minsize(p(520), p(450))
-        self.configure(bg=BG_WINDOW)
-        self.transient(parent)
-        self.grab_set()
-        center_window(self, parent, w, h, p)
-        config, _ = load_config(self.engine.root)
-        try:
-            cookies = read_json(self.engine.root / "credentials.json", {})
-        except RuntimeError:
-            cookies = {}
-        bottom_bar = tk.Frame(self, bg=BG_WINDOW, padx=p(20), pady=p(12))
-        bottom_bar.pack(side="bottom", fill="x")
-        tk.Frame(self, height=1, bg=BORDER_CARD).pack(side="bottom", fill="x")
-        ModernButton(bottom_bar, text="保存设置", primary=True, command=self.do_save, px=p).pack(
-            side="right"
-        )
-        ModernButton(bottom_bar, text="取消", primary=False, command=self.destroy, px=p).pack(
-            side="right", padx=(0, p(8))
-        )
+    def __init__(self, parent, engine, px, on_saved, focus_auth=False, scope="all"):
+        super().__init__(parent, bg=BG_WINDOW)
+        self.engine, self.px, self.on_saved = engine, px, on_saved
+        self.scope = scope
+        self.qr_panel = None
+        p = px
+        config, _ = load_config(engine.root)
+        bottom = tk.Frame(self, bg=BG_WINDOW, pady=p(8))
+        bottom.pack(side="bottom", fill="x")
+        self.save_button = ModernButton(bottom, text="保存账号" if scope == "account" else "保存设置",
+                                        primary=True, command=self.do_save, px=p)
+        self.save_button.pack(side="right")
+        self.save_status = tk.StringVar(value="")
+        tk.Label(bottom, textvariable=self.save_status, bg=BG_WINDOW, fg=TEXT_MUTED,
+                 font=(FONT_FAMILY,9), anchor="w").pack(side="left", fill="x", expand=True)
         scroll_area = tk.Frame(self, bg=BG_WINDOW)
-        scroll_area.pack(side="top", fill="both", expand=True)
+        scroll_area.pack(fill="both", expand=True)
         self.canvas = tk.Canvas(scroll_area, bg=BG_WINDOW, highlightthickness=0, bd=0)
-        self.scrollbar = ttk.Scrollbar(scroll_area, orient="vertical", command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.scrollbar = ttk.Scrollbar(scroll_area, command=self.canvas.yview)
         self.scrollbar.pack(side="right", fill="y")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
         self.canvas.pack(side="left", fill="both", expand=True)
-        container = tk.Frame(self.canvas, bg=BG_WINDOW, padx=p(20), pady=p(16))
-        self.canvas_window = self.canvas.create_window((0, 0), window=container, anchor="nw")
-        self.canvas.bind(
-            "<Configure>", lambda e: self.canvas.itemconfig(self.canvas_window, width=e.width)
-        )
-        container.bind(
-            "<Configure>", lambda _: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        )
-
-        def _on_mousewheel(event):
+        self.container = container = tk.Frame(self.canvas, bg=BG_WINDOW, padx=p(2), pady=p(10))
+        self.canvas_window = self.canvas.create_window(0, 0, window=container, anchor="nw")
+        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self.canvas_window, width=e.width))
+        container.bind("<Configure>", lambda _: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        if scope in ("automation", "all"):
+            build_automation(self, container, config, p)
+            build_system(self, container, config, p)
+        if scope in ("account", "all"):
             try:
-                if self.canvas.winfo_exists():
-                    self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-            except Exception:
-                pass
+                cookies = read_json(engine.root / "credentials.json", {})
+            except RuntimeError:
+                cookies = {}
+            account = engine.account or "尚未确认账号"
+            tk.Label(container, text=account, bg=BG_WINDOW, fg=TEXT_MAIN,
+                     font=(FONT_FAMILY,13,"bold"), anchor="w").pack(fill="x", pady=(0,p(12)))
+            build_auth(self, container, cookies, p, False)
+            self.qr_host = tk.Frame(container, bg=BG_WINDOW)
+            self.qr_host.pack(fill="x")
+        self._bind_wheel(container)
 
-        def _bind_wheel(_=None):
-            self.bind_all("<MouseWheel>", _on_mousewheel)
+    def _bind_wheel(self, widget):
+        widget.bind("<MouseWheel>", self._wheel, add="+")
+        for child in widget.winfo_children():
+            self._bind_wheel(child)
 
-        def _unbind_wheel(_=None):
-            self.unbind_all("<MouseWheel>")
+    def _wheel(self, event):
+        self.canvas.yview_scroll(-int(event.delta / 120), "units")
+        return "break"
 
-        self.bind("<Enter>", _bind_wheel)
-        self.bind("<Leave>", _unbind_wheel)
-        self.bind("<Destroy>", lambda _: self.unbind_all("<MouseWheel>"))
-        header = tk.Frame(container, bg=BG_WINDOW)
-        header.pack(fill="x", pady=(0, p(14)))
-        tk.Label(
-            header, text="系统设置", font=(FONT_FAMILY, 15, "bold"), bg=BG_WINDOW, fg=TEXT_MAIN
-        ).pack(anchor="w")
-        tk.Label(
-            header,
-            text="自定义开播挂机自动化策略、Windows 提醒与登录凭证",
-            font=(FONT_FAMILY, 9),
-            bg=BG_WINDOW,
-            fg=TEXT_MUTED,
-        ).pack(anchor="w", pady=(p(2), 0))
-        build_automation(self, container, config, p)
-        build_system(self, container, config, p)
-        build_auth(self, container, cookies, p, focus_auth)
+    def deactivate(self):
+        if self.qr_panel is not None and self.qr_panel.winfo_exists():
+            self.qr_panel.close()
+        # Do not leave revealed credentials visible after page navigation.
+        for field in ("e_sess", "e_jct"):
+            if hasattr(self, field):
+                getattr(self, field).configure(show="●")
 
     def set_auth_status(self, text, color):
         if hasattr(self, "status_label") and self.status_label.winfo_exists():
@@ -104,9 +87,14 @@ class SettingsDialog(tk.Toplevel):
         self.set_auth_status("登录信息已修改，保存前将重新验证", TEXT_MUTED)
 
     def open_qr_login(self):
-        from .qr_dialog import QrLoginDialog
+        from .qr_dialog import QrLoginPanel
 
-        QrLoginDialog(self, self.engine, self.px, self.on_qr_login)
+        if self.qr_panel is not None and self.qr_panel.winfo_exists():
+            return
+        self.qr_panel = QrLoginPanel(self.qr_host, self.engine, self.px, self.on_qr_login)
+        self.qr_panel.pack(fill="x", pady=self.px(10))
+        self._bind_wheel(self.qr_panel)
+        self.after_idle(lambda: self.canvas.yview_moveto(1.0))
 
     def on_qr_login(self, cookies, account, *, context=None):
         if not self.winfo_exists():
@@ -192,15 +180,27 @@ class SettingsDialog(tk.Toplevel):
             )
 
     def do_save(self):
-        try:
-            interval = int(self.interval_var.get().strip())
-            if not 1 <= interval <= 1440:
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("错误", "检查间隔需为 1~1440 之间的整数（分钟）", parent=self)
-            return
-        new_sess = self.sessdata_var.get().strip()
-        new_jct = self.jct_var.get().strip()
+        scope = getattr(self, "scope", "all")
+        automation = scope in ("automation", "all")
+        account = scope in ("account", "all")
+        changes = {}
+        if automation:
+            try:
+                interval = int(self.interval_var.get().strip())
+                if not 1 <= interval <= 1440:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("错误", "检查间隔需为 1~1440 之间的整数（分钟）", parent=self)
+                return
+            changes = {
+                "auto_revive": self.var_auto_revive.get(),
+                "auto_danmaku_intimacy": self.var_auto_danmu.get(),
+                "auto_like": self.var_auto_like.get(),
+                "notify_on_live": self.var_notify.get(),
+                "check_minutes": interval,
+            }
+        new_sess = self.sessdata_var.get().strip() if account else ""
+        new_jct = self.jct_var.get().strip() if account else ""
         if bool(new_sess) != bool(new_jct):
             messagebox.showwarning(
                 "凭证不完整",
@@ -214,14 +214,6 @@ class SettingsDialog(tk.Toplevel):
         ):
             self.do_verify_login(on_success=self.do_save)
             return
-        changes = {
-            "auto_revive": self.var_auto_revive.get(),
-            "auto_danmaku_intimacy": self.var_auto_danmu.get(),
-            "auto_like": self.var_auto_like.get(),
-            "notify_on_live": self.var_notify.get(),
-            "check_minutes": interval,
-        }
-
         def change(settings):
             settings = {**settings, **changes}
             settings.pop("danmaku", None)
@@ -229,20 +221,26 @@ class SettingsDialog(tk.Toplevel):
             return settings
 
         try:
-            save_login(new_sess, new_jct, self.engine.root / "credentials.json")
-            update_json(self.engine.root / "settings.json", change, {})
+            if account:
+                save_login(new_sess, new_jct, self.engine.root / "credentials.json")
+            if changes:
+                update_json(self.engine.root / "settings.json", change, {})
             self.engine.reload_settings()
         except (OSError, ValueError, RuntimeError):
             messagebox.showerror(
                 "保存失败", "请检查本机文件权限和配置，设置尚未全部应用。", parent=self
             )
             return
-        if not set_autostart(self.var_autostart.get()):
+        if automation and not set_autostart(self.var_autostart.get()):
             messagebox.showwarning(
                 "部分设置未应用", "设置已保存，但 Windows 自启动设置失败。", parent=self
             )
         self.on_saved()
-        self.destroy()
+        self.save_status.set("已保存并应用")
+
+
+# Keep the historical import and business-method API for external callers.
+SettingsDialog = SettingsPanel
 
 
 class AddMemberDialog(tk.Toplevel):

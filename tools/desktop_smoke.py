@@ -23,6 +23,8 @@ def main():
         engine.statuses = {str(member["room"]): {"live_status": 1, "title": "超长直播标题\n" * 30}
                            for member in members}
         engine.status_times = {str(member["room"]): time.time() for member in members}
+        engine.medals = {member["uid"]: {"medal_name": "长粉丝牌" if member["uid"] % 2 else "短牌", "level": 9}
+                         for member in members}
         capacities = []
         with (
             patch("desktop.avatars.load_avatar", return_value=__import__("PIL.Image", fromlist=["Image"]).new("RGB", (32,32), "green")),
@@ -70,6 +72,10 @@ def main():
                                   for frame in row_frames)
                     assert visible >= 6, (width, height, visible)
                     assert len({frame.winfo_height() for frame in row_frames}) == 1
+                    assert len({ui.tree.items[str(member["room"])]["medal"].winfo_rootx() for member in members}) == 1
+                    assert len({ui.tree.items[str(member["room"])]["title"].winfo_rootx() +
+                                ui.tree.items[str(member["room"])]["title"].winfo_width() for member in members}) == 1
+                    assert all(ui.tree.items[str(member["room"])]["title"].cget("anchor") == "e" for member in members)
                     capacities.append((width, height, canvas.winfo_height() // row_frames[0].winfo_height()))
                     for button in (ui.pause_button, ui.safety_button, ui.workbench.check_button):
                         assert button.winfo_height() >= button.winfo_reqheight()
@@ -125,6 +131,47 @@ def main():
                 qr.close()
                 assert qr.cancelled.is_set()
                 settings.destroy()
+                # Settings/account pages use the existing root, with independently scoped saves.
+                ui.open_settings()
+                automation = ui.workbench.settings_pages["automation"]
+                ui.root.update()
+                assert automation.winfo_toplevel() == ui.root
+                assert automation.winfo_ismapped() and not ui.tree.winfo_ismapped()
+                assert not hasattr(automation, "sessdata_var")
+                with patch("desktop.dialogs.save_login") as save_login, patch("desktop.dialogs.set_autostart", return_value=True):
+                    automation.do_save()
+                    save_login.assert_not_called()
+                ui.open_settings(focus_auth=True)
+                account = ui.workbench.settings_pages["account"]
+                ui.root.update()
+                assert account.winfo_toplevel() == ui.root and account.e_sess.cget("show")
+                assert not hasattr(account, "interval_var")
+                from desktop.qr_dialog import QrLoginPanel
+                inline_qr = QrLoginPanel(account.qr_host, engine, ui.px, Mock(), session_factory=lambda: session)
+                inline_qr.pack()
+                account.qr_panel = inline_qr
+                for _ in range(20):
+                    ui.root.update()
+                    if getattr(inline_qr, "qr_image", None):
+                        break
+                    time.sleep(0.05)
+                assert inline_qr.qr_image is not None and inline_qr.winfo_toplevel() == ui.root
+                account.e_sess.configure(show="")
+                ui.workbench.show_page("monitor")
+                ui.root.update()
+                assert inline_qr.cancelled.is_set() and account.e_sess.cget("show")
+                assert ui.tree.winfo_ismapped() and ui.tree.selection() == ("2",)
+                # Rounded buttons retain native disable/invoke behavior and transparent corners.
+                button = ui.workbench.check_button
+                from PIL import ImageTk
+                assert ImageTk.getimage(button._photos[0]).getpixel((0,0))[3] == 0
+                calls = Mock()
+                button.configure(command=calls, state="disabled")
+                button.invoke()
+                calls.assert_not_called()
+                button.configure(state="normal", text="立即检查测试")
+                button.invoke()
+                calls.assert_called_once()
                 add = AddMemberDialog(ui.root, engine, ui.px, lambda: None)
                 add.update_idletasks()
                 add.destroy()

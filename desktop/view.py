@@ -20,7 +20,7 @@ except ImportError:
     Image = ImageDraw = None
 from desktop.storage import read_json
 from .widgets import *
-from .dialogs import SettingsDialog, AddMemberDialog, SyncMedalsDialog
+from .dialogs import AddMemberDialog, SyncMedalsDialog
 
 
 class TrayUI:
@@ -111,13 +111,7 @@ class TrayUI:
 
     def open_settings(self, focus_auth=False, scan=False):
         self.show()
-        dialog = SettingsDialog(
-            self.root,
-            self.engine,
-            self.px,
-            lambda: self.commands.put("check"),
-            focus_auth=focus_auth,
-        )
+        dialog = self.workbench.show_page("account" if focus_auth or scan else "automation")
         if scan:
             dialog.after_idle(dialog.open_qr_login)
 
