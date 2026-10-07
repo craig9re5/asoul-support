@@ -104,6 +104,8 @@ class Workbench:
         self.detail_heartbeat = label(self.detail_frame, "", size=9, color=MUTED)
         self.detail_heartbeat.pack(fill="x", pady=(p(18),p(12)))
         self.detail_heartbeat.configure(wraplength=p(275))
+        self.detail_warning = label(self.detail_frame, "", size=9, color="#a65c00")
+        self.detail_warning.configure(wraplength=p(275))
         action = self.detail_actions
         ModernButton(action, text="打开直播间", command=ui.on_open_room, px=p).pack(side="left")
         self.redo_button = ModernButton(action, text="补齐任务", command=lambda: ui.on_redo_task("all"), px=p)
@@ -205,5 +207,10 @@ class Workbench:
         import time
         last = time.strftime("%H:%M:%S", time.localtime(heartbeat)) if heartbeat else "暂无成功心跳"
         self.detail_heartbeat.configure(text=f"最近心跳：{last}" + ("\n"+row["task_error"] if row.get("task_error") else ""))
+        if row.get("watch_warning"):
+            self.detail_warning.configure(text="⚠ " + row["watch_warning"])
+            self.detail_warning.pack(fill="x", pady=(0, self.ui.px(12)))
+        else:
+            self.detail_warning.pack_forget()
         enabled = row.get("live_status") == 1 and not self.snap.get("paused") and not self.snap.get("safety",{}).get("blocked")
         self.redo_button.configure(state="normal" if enabled else "disabled")

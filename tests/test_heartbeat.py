@@ -395,8 +395,9 @@ class DanmakuTaskTests(unittest.TestCase):
     @patch("heartbeat._ensure_live_buvid", return_value="device")
     @patch("heartbeat._get_room_info", return_value={"area_id": 1, "parent_area_id": 2})
     @patch("heartbeat.enter_room", return_value=True)
+    @patch("heartbeat.get_fans_club_task_info", return_value={})
     def test_watch_loop_rechecks_danmaku_after_heartbeat(
-        self, _enter, _room, _buvid, _e, _x, _status, send_tasks, _wait, _log, _notify
+        self, _club, _enter, _room, _buvid, _e, _x, _status, send_tasks, _wait, _log, _notify
     ):
         result = heartbeat.watch_room(
             {"name": "test", "room": 1727071052, "uid": 1891335475},
@@ -436,8 +437,9 @@ class DanmakuTaskTests(unittest.TestCase):
     @patch("heartbeat._ensure_live_buvid", return_value="device")
     @patch("heartbeat._get_room_info", return_value={"area_id": 1, "parent_area_id": 2})
     @patch("heartbeat.enter_room", return_value=True)
+    @patch("heartbeat.get_fans_club_task_info", return_value={})
     def test_watch_loop_stops_rechecking_once_danmaku_done(
-        self, _enter, _room, _buvid, _e, _x, _status, send_tasks, _wait, _log, _notify
+        self, _club, _enter, _room, _buvid, _e, _x, _status, send_tasks, _wait, _log, _notify
     ):
         result = heartbeat.watch_room(
             {"name": "test", "room": 1727071052, "uid": 1891335475},

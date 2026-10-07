@@ -40,6 +40,16 @@ def format_output(
                 )
             else:
                 lines.append(f"    ❌ {r['name']}  — {r.get('error', '心跳失败')}")
+            watch = r.get("watch_progress", {})
+            progress = watch.get("progress") or {}
+            if watch:
+                if watch.get("status") == "unavailable":
+                    lines.append("      看播任务：暂时无法核验")
+                else:
+                    lines.append(f"      看播任务：{progress.get('current', '?')}/{progress.get('limit', '?')}"
+                                 + ("（已完成）" if progress.get("done") else "（未完成）"))
+                if watch.get("warning"):
+                    lines.append("      ⚠️ " + watch["warning"])
     if offline_members:
         lines.append("")
         lines.append(f"  💤 未开播：{', '.join(offline_members)}")

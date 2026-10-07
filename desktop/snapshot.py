@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 import os
 import time
 from asoul_support.runtime import APP_VERSION, task_day
+from asoul_support.services.watch_progress import CHECK_INTERVAL, parse_watch_task
 
 
 def project_snapshot(engine, states, now):
@@ -58,6 +59,7 @@ def project_row(engine, member, state, now):
         or (now - task_entry.get("updated", 0) > ttl)
         or bool(engine.task_errors.get(room_str))
     )
+    medals_stale = tasks_stale
     live_time_val = live_info.get("live_time")
     live_duration = elapsed_label(live_status, live_time_val, now)
     task_result = state.get("task_result", {})
@@ -109,11 +111,16 @@ def project_row(engine, member, state, now):
     if safety.get("blocked"):
         phase = "账号保护暂停"
         task_error = safety.get("reason", "需要处理账号异常")
+    watch, watch_warning, task_entry, tasks_stale = watch_observation(
+        state, task_entry, active, tasks_stale, now
+    )
+    if safety.get("blocked") or engine.paused or heartbeat_stale:
+        watch_warning = ""
     today_value = medal.get("today_intimacy")
     checked = engine.account_checked_at
     medal_day = (datetime.fromtimestamp(checked, timezone(timedelta(hours=8))).date().isoformat()
                  if checked else "")
-    gain = (today_value if not tasks_stale and medal_day == task_day()
+    gain = (today_value if not medals_stale and medal_day == task_day()
             and isinstance(today_value, int) and not isinstance(today_value, bool)
             and today_value >= 0 else None)
     return {
@@ -127,6 +134,8 @@ def project_row(engine, member, state, now):
         "tasks_stale": tasks_stale,
         "session_id": state.get("session_id"),
         "task_error": task_error,
+        "watch_warning": watch_warning,
+        "watch_progress": watch,
         "started": state.get("started"),
         "beats": state.get("beats", 0),
         "last_heartbeat": state.get("last_heartbeat"),
@@ -148,6 +157,30 @@ def project_row(engine, member, state, now):
         "next_intimacy": task_entry.get("next_intimacy", 0),
         "task_light_days": task_entry.get("task_light_days", 0),
     }
+
+
+def watch_observation(state, task_entry, active, tasks_stale, now):
+    """Project verified task rows without making an old medal counter look fresh."""
+    watch = state.get("watch_progress", {}) if active else {}
+    if watch.get("day") != task_day():
+        return {}, "", task_entry, tasks_stale
+    warning = ""
+    ttl = CHECK_INTERVAL * 2 + 180
+    if 0 <= now - number(watch.get("checked_at")) <= ttl:
+        warning = watch.get("warning", "")
+        if (number(watch.get("verified_at")) >= task_entry.get("updated", 0)
+                and 0 <= now - number(watch.get("verified_at")) <= ttl
+                and isinstance(watch.get("tasks"), list)):
+            task_entry = {**task_entry, **{key: watch[key] for key in
+                                         ("tasks", "intimacy", "next_intimacy") if key in watch}}
+            tasks_stale = False
+    else:
+        warning = "看播进度核验已过期，无法确认亲密度是否到账，请点击立即检查。"
+    progress = parse_watch_task({"task_info": task_entry.get("tasks", [])})
+    if (not tasks_stale and progress and (progress.get("done")
+            or progress.get("current", -1) > (watch.get("progress") or {}).get("current", -1))):
+        warning = ""
+    return watch, warning, task_entry, tasks_stale
 
 
 def elapsed_label(live_status, live_time_val, now):

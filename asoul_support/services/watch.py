@@ -4,6 +4,7 @@ import uuid
 from typing import Optional, Dict
 from ..policies import *
 from .. import safety
+from .watch_progress import WatchProgressMonitor
 
 
 def intimacy_change(before, after, start_day, end_day, *, _gateway):
@@ -75,6 +76,8 @@ def watch_room(
             "stopped_reason": "session",
         }
     uuid_str = str(uuid.uuid4())
+    progress_monitor = WatchProgressMonitor(room_id, up_id, name, sessdata, bili_jct, _gateway)
+    progress_monitor.check(force=True)
     e_data = _gateway.x25kn_enter_room(
         room_id, parent_area_id, area_id, up_id, buvid, uuid_str, sessdata, bili_jct
     )
@@ -119,6 +122,7 @@ def watch_room(
             sessdata,
             bili_jct,
             _gateway,
+            progress_monitor=progress_monitor,
         )
     else:
         return _watch_duration(
@@ -134,6 +138,7 @@ def watch_room(
             sessdata,
             bili_jct,
             _gateway,
+            progress_monitor=progress_monitor,
         )
 
 
@@ -150,6 +155,7 @@ def _watch_until_offline(
     sessdata,
     bili_jct,
     _gateway,
+    progress_monitor=None,
 ):
     title_str = f"「{title}」" if title else ""
     start_clock = time.strftime("%H:%M")
@@ -182,6 +188,8 @@ def _watch_until_offline(
         if result:
             beats_ok += 1
             consecutive_fail = 0
+            if progress_monitor:
+                progress_monitor.heartbeat(chain.heartbeat_interval)
         else:
             consecutive_fail += 1
         elapsed_min = int((time.time() - start_time) / 60)
@@ -192,6 +200,8 @@ def _watch_until_offline(
             )
         status = _gateway._get_single_room_status(room_id, sessdata, bili_jct)
         if status and status.get("live_status") != 1:
+            if progress_monitor:
+                progress_monitor.check(force=True)
             elapsed_min = int((time.time() - start_time) / 60)
             end_clock = time.strftime("%H:%M")
             h, m = divmod(elapsed_min, 60)
@@ -209,6 +219,7 @@ def _watch_until_offline(
                 "minutes": elapsed_min,
                 "stopped_reason": "offline",
                 "x25kn": True,
+                "watch_progress": progress_monitor.result if progress_monitor else {},
             }
         if consecutive_fail >= 10:
             elapsed_min = int((time.time() - start_time) / 60)
@@ -244,6 +255,7 @@ def _watch_duration(
     sessdata,
     bili_jct,
     _gateway,
+    progress_monitor=None,
 ):
     started = time.monotonic()
     deadline = started + max(0, duration_min) * 60
@@ -267,6 +279,8 @@ def _watch_duration(
         beats_total += 1
         if result:
             beats_ok += 1
+            if progress_monitor:
+                progress_monitor.heartbeat(chain.heartbeat_interval)
         elapsed_min = int((time.monotonic() - started) / 60)
         if beats_total % 5 == 0:
             print(f"    💓 心跳 {beats_total}(X25Kn)  已挂 {elapsed_min} 分钟", file=sys.stderr)
@@ -279,6 +293,8 @@ def _watch_duration(
             next_check = time.monotonic() + _gateway.DANMAKU_RECHECK_INTERVAL
     actual_minutes = int((time.monotonic() - started) / 60)
     hold = safety.status(sessdata)
+    if progress_monitor and not hold["blocked"]:
+        progress_monitor.check(force=True)
     return {
         "name": name,
         "room": room_id,
@@ -287,6 +303,7 @@ def _watch_duration(
         "beats_total": beats_total,
         "minutes": actual_minutes,
         "x25kn": True,
+        "watch_progress": progress_monitor.result if progress_monitor else {},
         **({"error": hold["reason"], "stopped_reason": "safety"} if hold["blocked"] else {}),
     }
 

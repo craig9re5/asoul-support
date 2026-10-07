@@ -91,6 +91,33 @@ def main():
                         assert button.winfo_x() + button.winfo_width() <= actions.winfo_width()
                     assert actions.winfo_y() + actions.winfo_height() <= ui.workbench.detail_outer.winfo_height()
                 ui.root.withdraw()
+                # A real warning must remain visible and notify only once while hidden.
+                from desktop.worker import RoomStateRecorder
+                from asoul_support.runtime import task_day
+                recorder = RoomStateRecorder(root / "state/2.json", members[0])
+                recorder({"type": "x25kn_x_success", "interval": 60})
+                recorder({"type": "watch_progress", "day": task_day(), "checked_at": time.time(),
+                          "verified_at": time.time(), "status": "stalled", "warning_since": time.time(),
+                          "progress": {"current": 0, "limit": 10},
+                          "tasks": [{"jump_type": "watchLive", "title": "观看直播满15分钟",
+                                     "sub_title": "每日上限 0/10", "is_done": False}],
+                          "warning": "看播进度已约 30 分钟未增长，奖励尚未确认；请在 B 站核对。"})
+                engine.workers[2] = Mock()
+                engine.workers[2].poll.return_value = None
+                ui.tray.notify.reset_mock()
+                ui.refresh()
+                ui.refresh()
+                assert "看播收益待核验" in ui.summary.get()
+                assert "看播收益待核验" in ui.footer.get()
+                assert ui.workbench.detail_warning.winfo_manager() == "pack"
+                assert "未增长" in ui.workbench.detail_warning.cget("text")
+                assert ui.tree.items["2"]["phase"].cget("fg") == "#a65c00"
+                ui.tray.notify.assert_called_once()
+                recorder({"type": "watch_progress", "day": task_day(), "checked_at": time.time(),
+                          "status": "tracking", "warning": ""})
+                ui.refresh()
+                assert not ui.workbench.detail_warning.winfo_manager()
+                engine.workers.clear()
                 engine.safety = {"blocked": True, "kind": "review", "reason": "测试账号保护暂停"}
                 ui.refresh()
                 assert "测试账号保护暂停" in ui.footer.get()

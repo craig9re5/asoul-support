@@ -225,6 +225,7 @@ class TrayUI:
             self._render_rows(snap)
             self.workbench.render(snap)
             self._render_footer(snap)
+            self._notify_watch_warnings(snap)
         except Exception:
             logging.exception("Desktop refresh failed")
             self.summary.set("界面刷新失败，稍后自动重试；请查看日志")
@@ -343,6 +344,7 @@ class TrayUI:
 
     def _render_overview(self, snap):
         active = sum((row["active"] for row in snap["rows"]))
+        warnings = sum(bool(row.get("watch_warning")) for row in snap["rows"])
         title = "已暂停" if snap["paused"] else f"{active} 个直播间挂机中" if active else "等待开播"
         if snap["error"]:
             title = "需要处理"
@@ -352,6 +354,7 @@ class TrayUI:
             or f"关注 {len(snap['rows'])} · 直播 {live} · "
             + ("已暂停" if snap["paused"] else f"挂机 {active}")
             + (" · 正在检查…" if snap["checking"] else "")
+            + (f" · {warnings} 个看播收益待核验" if warnings else "")
         )
         notice, until = getattr(self, "task_notice", ("", 0))
         if time.time() < until:
@@ -368,7 +371,7 @@ class TrayUI:
         else:
             self.account_label.configure(text="🔴 尚未登录", fg="#991b1b")
             self.badge_frame.configure(bg="#fef2f2", highlightbackground="#fecaca")
-        color = "#f2ab55" if snap["error"] else "#9ca9af" if snap["paused"] else "#63d4b2"
+        color = "#f2ab55" if snap["error"] or warnings else "#9ca9af" if snap["paused"] else "#63d4b2"
         if getattr(self, "last_color", None) != color:
             self.tray.icon = icon_image(color)
             self.last_color = color
@@ -467,6 +470,10 @@ class TrayUI:
             )
             self.footer.set(hold["reason"] + suffix)
             return
+        warnings = [row["name"] for row in snap["rows"] if row.get("watch_warning")]
+        if warnings:
+            self.footer.set("⚠ 看播收益待核验：" + "、".join(warnings) + "；请选择主播查看详情，或点击立即检查。")
+            return
         next_time = (
             time.strftime("%H:%M:%S", time.localtime(snap["next_check"]))
             if snap["next_check"]
@@ -477,3 +484,24 @@ class TrayUI:
             if snap["paused"]
             else f"下次检查：{next_time}"
         )
+
+    def _notify_watch_warnings(self, snap):
+        from asoul_support.runtime import task_day
+
+        day = task_day()
+        if getattr(self, "watch_notice_day", None) != day:
+            self.watch_notice_day = day
+            self.watch_notices = set()
+        for row in snap["rows"]:
+            if not row.get("watch_warning"):
+                continue
+            watch = row.get("watch_progress", {})
+            key = (row["room"], row.get("session_id") or row.get("started"),
+                   watch.get("status"), watch.get("warning_since"))
+            if key in self.watch_notices:
+                continue
+            try:
+                self.tray.notify(f"【{row['name']}】{row['watch_warning']}", title="LiveSupport · 看播收益提醒")
+            except Exception:
+                logging.exception("Watch reward notification failed")
+            self.watch_notices.add(key)

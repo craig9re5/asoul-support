@@ -72,6 +72,8 @@ class RoomStateRecorder:
             self.state.update(phase="本轮结束", result=event)
         elif kind == "task_check":
             self.state.update(task_result=event, task_updated=time.time())
+        elif kind == "watch_progress":
+            self.state["watch_progress"] = event
         self.save()
 
     def finish(self, code):
