@@ -128,6 +128,14 @@ class WatchProgressTests(unittest.TestCase):
         self.assertEqual(gateway.get_fans_club_task_info.call_count, 2)
         self.assertFalse(monitor.result["warning"])
 
+    def test_malformed_task_payload_is_unavailable_without_crashing_watch(self):
+        for tasks in (None, {}, "invalid", [{"jump_type": "watchLive", "sub_title": 123}]):
+            with self.subTest(tasks=tasks):
+                self.assertIsNone(parse_watch_task({"task_info": tasks}))
+        info = club()
+        info["task_info"][0]["title"] = 123
+        self.assertEqual(parse_watch_task(info)["threshold"], 1800)
+
     def test_cli_reports_pending_rewards_despite_successful_connection(self):
         from asoul_support import heartbeat
         result = heartbeat.format_output(

@@ -10,16 +10,20 @@ MIN_STALL_SECONDS = 30 * 60
 
 def parse_watch_task(club):
     tasks = club.get("task_info", []) if isinstance(club, dict) else []
+    if not isinstance(tasks, list):
+        return None
     task = next((t for t in tasks if isinstance(t, dict) and t.get("jump_type") == "watchLive"), None)
     if not task:
         return None
-    match = re.search(r"(\d+)\s*/\s*(\d+)", task.get("sub_title") or "")
+    subtitle = task.get("sub_title")
+    match = re.search(r"(\d+)\s*/\s*(\d+)", subtitle) if isinstance(subtitle, str) else None
     if not match:
         return {"done": True} if task.get("is_done") else None
     current, limit = map(int, match.groups())
     if limit < 1 or current > limit:
         return None
-    minutes = re.search(r"(\d+)\s*分钟", task.get("title") or "")
+    title = task.get("title")
+    minutes = re.search(r"(\d+)\s*分钟", title) if isinstance(title, str) else None
     round_minutes = int(minutes[1]) if minutes else 15
     if not 1 <= round_minutes <= 120:
         round_minutes = 15
