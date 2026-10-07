@@ -235,6 +235,8 @@ def _watch_until_offline(
                 "stopped_reason": "error",
                 "x25kn": True,
             }
+        if result and progress_monitor:
+            progress_monitor.maybe_recover(chain)
         if (send_danmaku or send_live_likes) and (
             _gateway.task_day() != task_runner.day or time.monotonic() >= next_danmaku_check
         ):
@@ -284,6 +286,8 @@ def _watch_duration(
         elapsed_min = int((time.monotonic() - started) / 60)
         if beats_total % 5 == 0:
             print(f"    💓 心跳 {beats_total}(X25Kn)  已挂 {elapsed_min} 分钟", file=sys.stderr)
+        if result and progress_monitor and time.monotonic() + chain.heartbeat_interval < deadline:
+            progress_monitor.maybe_recover(chain)
         if (
             (send_danmaku or send_live_likes)
             and time.monotonic() < deadline
@@ -348,7 +352,7 @@ class HeartbeatChain:
         print(f"    📡 X25Kn E 已通过，rule={self.secret_rule}", file=sys.stderr)
 
     def restart(self) -> bool:
-        """X 失败后重新发送 E，避免用过期时间戳连续失败。"""
+        """重新发送 E，更新密钥、时间戳和序号；保留登录和设备会话。"""
         restarted = self.gateway.x25kn_enter_room(
             self.room_id,
             self.parent_area_id,
@@ -362,14 +366,15 @@ class HeartbeatChain:
         self.last_response_at = time.monotonic()
         if not restarted:
             return False
-        self.secret_key = restarted["secret_key"]
-        self.secret_rule = restarted["secret_rule"]
-        self.ets = restarted["timestamp"]
-        self.heartbeat_interval = int(
+        secret_key, secret_rule, ets = (restarted["secret_key"], restarted["secret_rule"],
+                                       restarted["timestamp"])
+        heartbeat_interval = int(
             restarted.get("heartbeat_interval") or self.gateway.HEARTBEAT_INTERVAL
         )
-        if self.heartbeat_interval < 5 or self.heartbeat_interval > 300:
-            self.heartbeat_interval = self.gateway.HEARTBEAT_INTERVAL
+        if heartbeat_interval < 5 or heartbeat_interval > 300:
+            heartbeat_interval = self.gateway.HEARTBEAT_INTERVAL
+        self.secret_key, self.secret_rule, self.ets = secret_key, secret_rule, ets
+        self.heartbeat_interval = heartbeat_interval
         self.protocol_seq = 0
         print("    🔄 已重建 X25Kn 心跳链", file=sys.stderr)
         return True

@@ -24,6 +24,7 @@ http / runtime / credentials / members / context / danmaku_pacing
 | --- | --- | --- |
 | 数据目录、事件监听、通知回调 | RuntimeContext / AppContext | 一次应用操作；ContextVar 在 finally 恢复，隔离线程和嵌套调用 |
 | 心跳密钥、规则、时间戳、序号 | HeartbeatChain | 一次直播会话；失败重建 E 链 |
+| 看播收益核验与有限恢复 | WatchProgressMonitor / ProgressTracker | 一轮挂机；同一日期和进度值只恢复一次，整轮最多两次；恢复结果投影至桌面 |
 | 弹幕阶段状态、消息池、发送次数 | MedalDanmakuTask | 一次任务检查 |
 | 每日尝试额度与任务完成状态 | DailyTaskRunner + state/tasks JSON | 认证 UID、房间、北京时间日期；会话替换保留额度 |
 | 账号异常暂停、底层请求预算 | safety + http | 同一数据目录内跨进程共享；写请求未知结果不重放 |

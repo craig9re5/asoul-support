@@ -3,9 +3,11 @@
 import re
 import sys
 import time
+from .. import safety
 
 CHECK_INTERVAL = 10 * 60
 MIN_STALL_SECONDS = 30 * 60
+MAX_REWARD_RECONNECTS = 2
 
 
 def parse_watch_task(club):
@@ -90,6 +92,9 @@ class WatchProgressMonitor:
         self.warning_since = None
         self.result = {}
         self.verified = {}
+        self.reconnects = 0
+        self.recovery_episodes = {}
+        self.next_recovery_check = 0
 
     def heartbeat(self, interval):
         self.accepted_seconds += interval
@@ -122,7 +127,75 @@ class WatchProgressMonitor:
                              "intimacy": club.get("intimacy", 0),
                              "next_intimacy": club.get("next_intimacy", 0)}
         self.result.update(self.verified)
+        self._publish()
+
+    def _episode(self):
+        progress = self.result.get("progress") or {}
+        return (self.result.get("day"), progress.get("current"), progress.get("limit"))
+
+    def maybe_recover(self, chain):
+        """One E per stalled progress value; never restart on an unverified read."""
+        now = time.monotonic()
+        if (self.result.get("status") != "stalled" or now < self.next_recovery_check
+                or self._episode() in self.recovery_episodes
+                or self.reconnects >= MAX_REWARD_RECONNECTS
+                or safety.status(self.credentials[0])["blocked"]):
+            return
+        self.next_recovery_check = now + CHECK_INTERVAL
+        # Delayed credit may have arrived since the last scheduled observation.
+        self.check(force=True)
+        if self.result.get("status") != "stalled":
+            return
+        if self._episode() in self.recovery_episodes:
+            return
+        try:
+            live = self.gateway._get_single_room_status(self.room, *self.credentials)
+        except (OSError, ValueError, RuntimeError) as exc:
+            self.gateway._log({"type": "watch_reward_live_query_error", "room_id": self.room,
+                               "error": type(exc).__name__})
+            return
+        if (not live or live.get("live_status") != 1
+                or safety.status(self.credentials[0])["blocked"]):
+            return
+        self.reconnects += 1
+        episode = self._episode()
+        recovery = {"status": "failed", "attempt": self.reconnects,
+                    "attempted_at": time.time(), "started": time.monotonic(),
+                    "accepted_at": self.accepted_seconds}
+        # Record before IO so even a failed restart consumes this episode's budget.
+        self.recovery_episodes[episode] = recovery
+        try:
+            if chain.restart():
+                recovery["status"] = "reconnected"
+        except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
+            self.gateway._log({"type": "watch_reward_reconnect_error", "room_id": self.room,
+                               "error": type(exc).__name__})
+        self.gateway._log({"type": "watch_reward_reconnect", "room_id": self.room,
+                           "attempt": self.reconnects, "success": recovery["status"] == "reconnected"})
+        self._publish()
+
+    def _publish(self):
+        recovery = self.recovery_episodes.get(self._episode())
+        if recovery and self.result["status"] == "stalled":
+            elapsed = max(0, time.monotonic() - recovery["started"])
+            if (recovery["status"] == "reconnected" and elapsed >= MIN_STALL_SECONDS
+                    and self.accepted_seconds - recovery["accepted_at"] >= MIN_STALL_SECONDS):
+                recovery["status"] = "pending_rewards"
+            message = {
+                "reconnected": "已自动重建该房间心跳，正在等待服务端结算；同一次停滞不再重连。",
+                "failed": "自动重建心跳未成功，同一次停滞不再重试，请检查网络或在 B 站核对。",
+                "pending_rewards": "重建心跳后又观察至少 30 分钟，仍未确认看播增长；请在 B 站核对，不继续重连。",
+            }[recovery["status"]]
+            progress = self.result["progress"]
+            self.result["warning"] = f"看播进度 {progress['current']}/{progress['limit']}：{message}"
+        elif self.result["status"] == "stalled" and self.reconnects >= MAX_REWARD_RECONNECTS:
+            self.result["warning"] += " 本轮收益恢复重连次数已达上限，请手动核对。"
+        self.result["recovery"] = {"attempts": self.reconnects, "max_attempts": MAX_REWARD_RECONNECTS,
+                                   "status": recovery["status"] if recovery else "none",
+                                   "attempted_at": recovery["attempted_at"] if recovery else None}
         kind = self.result["status"] if self.result["warning"] else ""
+        if kind == "stalled" and recovery and recovery["status"] in {"failed", "pending_rewards"}:
+            kind += ":" + recovery["status"]
         if kind and kind != self.warning_kind:
             self.warning_since = time.time()
         elif not kind and self.result["status"] != "unavailable":
