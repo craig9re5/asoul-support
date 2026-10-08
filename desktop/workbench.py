@@ -5,7 +5,7 @@ import tkinter as tk
 from .avatars import AvatarLoader
 from .room_list import RoomList
 from .presentation import phase_label, gain_label
-from .widgets import ModernButton, FONT_FAMILY
+from .widgets import ModernButton, FONT_FAMILY, icon_image, navigation_icon
 from .dialogs import SettingsPanel
 
 BG = "#f5f6f5"
@@ -29,18 +29,7 @@ class Workbench:
         p = ui.px
         shell = tk.Frame(ui.root, bg=BG)
         shell.pack(fill="both", expand=True)
-        side = tk.Frame(shell, bg=SIDE, width=p(194), padx=p(15), pady=p(25))
-        side.pack(side="left", fill="y")
-        side.pack_propagate(False)
-        label(side, "LiveSupport", size=16, color="#e5eeeb", bg=SIDE, bold=True).pack(anchor="w", pady=(0,p(35)))
-        for text, command in (("监控总览", lambda: self.show_page("monitor")),
-                              ("活动记录", lambda: os.startfile(str(ui.engine.root / "logs"))),
-                              ("自动化设置", ui.open_settings), ("账号管理", lambda: ui.open_settings(focus_auth=True))):
-            button = tk.Button(side, text=text, command=command, bg=SIDE, fg="#c0ceca",
-                               activebackground="#334647", activeforeground="#ffffff", relief="flat",
-                               bd=0, anchor="w", padx=p(10), pady=p(12), font=(FONT_FAMILY, 10), cursor="hand2")
-            button.pack(fill="x", pady=p(2))
-        label(side, "本机运行 · 托盘常驻", size=9, color="#a6bab4", bg=SIDE).pack(side="bottom", anchor="w")
+        self._build_sidebar(shell)
         self.body = tk.Frame(shell, bg=BG, padx=p(14), pady=p(14))
         self.body.pack(side="left", fill="both", expand=True)
         header = tk.Frame(self.body, bg=BG)
@@ -112,6 +101,47 @@ class Workbench:
         self.redo_button.pack(side="left", padx=(p(8),0))
         self.settings_host = tk.Frame(self.body, bg=BG)
 
+    def _build_sidebar(self, shell):
+        from PIL import ImageTk
+        ui, p = self.ui, self.ui.px
+        side = tk.Frame(shell, bg=SIDE, width=p(194), padx=p(15), pady=p(25))
+        side.pack(side="left", fill="y")
+        side.pack_propagate(False)
+        brand = tk.Frame(side, bg=SIDE)
+        brand.pack(fill="x", pady=(0, p(32)))
+        self.brand_photo = ImageTk.PhotoImage(icon_image(size=p(34)), master=side)
+        tk.Label(brand, image=self.brand_photo, bg=SIDE, bd=0).pack(side="left", padx=(0, p(8)))
+        brand_text = tk.Frame(brand, bg=SIDE)
+        brand_text.pack(side="left")
+        label(brand_text, "LiveSupport", size=12, color="#e5eeeb", bg=SIDE, bold=True).pack(anchor="w")
+        label(brand_text, "直播助手", size=8, color="#8ca9a1", bg=SIDE).pack(anchor="w", pady=(p(2), 0))
+        self.nav_buttons, self.nav_photos = {}, {}
+        for page, text, command in (
+            ("monitor", "监控总览", lambda: self.show_page("monitor")),
+            ("automation", "自动化设置", ui.open_settings),
+            ("account", "账号管理", lambda: ui.open_settings(focus_auth=True)),
+            ("history", "活动记录", lambda: os.startfile(str(ui.engine.root / "logs"))),
+        ):
+            self.nav_photos[page] = [ImageTk.PhotoImage(navigation_icon(page, p(17), color), master=side)
+                                     for color in ("#aac1b9", "#88dfc4")]
+            button = tk.Button(side, text="  " + text, image=self.nav_photos[page][0], compound="left",
+                               command=command, bg=SIDE, fg="#c0ceca", activebackground="#334647",
+                               activeforeground="white", relief="flat", bd=0, anchor="w",
+                               padx=p(10), pady=p(12), font=(FONT_FAMILY, 10), cursor="hand2")
+            self.nav_buttons[page] = button
+            if page != "history":
+                button.pack(fill="x", pady=p(2))
+        label(side, "本机运行 · 托盘常驻", size=9, color="#a6bab4", bg=SIDE).pack(side="bottom", anchor="w")
+        self.activity_button = self.nav_buttons["history"]
+        self.activity_button.pack(side="bottom", fill="x", pady=(0, p(12)))
+        self._select_navigation("monitor")
+
+    def _select_navigation(self, page):
+        for key, button in self.nav_buttons.items():
+            selected = key == page
+            button.configure(bg="#2b4443" if selected else SIDE, fg="#e5f7ef" if selected else "#c0ceca",
+                             image=self.nav_photos[key][int(selected)])
+
     def show_page(self, page):
         if page not in ("monitor", "automation", "account"):
             raise ValueError("Unknown workbench page")
@@ -120,6 +150,7 @@ class Workbench:
             previous.deactivate()
             previous.pack_forget()
         self.page = page
+        self._select_navigation(page)
         if page == "monitor":
             self.settings_host.pack_forget()
             self.toolbar.pack(fill="x", pady=(0,self.ui.px(10)))

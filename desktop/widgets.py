@@ -35,12 +35,43 @@ BTN_FG = "#334155"
 FONT_FAMILY = "Microsoft YaHei UI"
 
 
-def icon_image(color="#63d4b2"):
-    image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+def icon_image(color="#63d4b2", size=64):
+    scale = 4
+    image = Image.new("RGBA", (64 * scale, 64 * scale), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((3, 3, 61, 61), radius=17, fill="#16262d")
-    draw.line([(13, 34), (23, 34), (28, 20), (35, 46), (41, 29), (51, 29)], fill=color, width=5)
-    return image
+    draw.rounded_rectangle(tuple(v * scale for v in (3, 3, 61, 61)), radius=17 * scale, fill="#16262d")
+    points = [(x * scale, y * scale) for x, y in [(13, 34), (23, 34), (28, 20), (35, 46), (41, 29), (51, 29)]]
+    draw.line(points, fill=color, width=5 * scale, joint="curve")
+    return image.resize((size, size), Image.Resampling.LANCZOS)
+
+
+def navigation_icon(kind, size, color="#aac1b9"):
+    scale = 4
+    image = Image.new("RGBA", (24 * scale, 24 * scale))
+    draw = ImageDraw.Draw(image)
+    def line(points):
+        draw.line([(x * scale, y * scale) for x, y in points], fill=color, width=2 * scale, joint="curve")
+    def ellipse(box):
+        draw.ellipse(tuple(v * scale for v in box), outline=color, width=2 * scale)
+    if kind == "monitor":
+        draw.rounded_rectangle(tuple(v * scale for v in (3, 4, 21, 17)), radius=2 * scale,
+                               outline=color, width=2 * scale)
+        line([(8, 21), (16, 21)])
+        line([(12, 17), (12, 21)])
+    elif kind == "automation":
+        for y, x in ((6, 9), (12, 16), (18, 7)):
+            line([(3, y), (x - 3, y)])
+            line([(x + 3, y), (21, y)])
+            ellipse((x - 3, y - 3, x + 3, y + 3))
+    elif kind == "account":
+        ellipse((8, 3, 16, 11))
+        draw.arc(tuple(v * scale for v in (4, 13, 20, 27)), start=180, end=360,
+                 fill=color, width=2 * scale)
+        line([(4, 20), (20, 20)])
+    else:
+        ellipse((3, 3, 21, 21))
+        line([(12, 7), (12, 12), (16, 14)])
+    return image.resize((size, size), Image.Resampling.LANCZOS)
 
 
 def format_task_mini_badge(tasks, is_lighted=1, has_medal=True):
@@ -189,31 +220,57 @@ class ToggleSwitch(tk.Canvas):
         )
         self.var = variable if variable is not None else tk.BooleanVar(value=False)
         self.command = command
+        self.hovered = self.focused = False
+        self.configure(takefocus=True)
         self.bind("<Button-1>", self.toggle)
-        self.var.trace_add("write", lambda *_: self.render())
+        self.bind("<space>", self.toggle)
+        self.bind("<Return>", self.toggle)
+        self.bind("<Enter>", lambda _: self._appearance(hovered=True))
+        self.bind("<Leave>", lambda _: self._appearance(hovered=False))
+        self.bind("<FocusIn>", lambda _: self._appearance(focused=True))
+        self.bind("<FocusOut>", lambda _: self._appearance(focused=False))
+        self.trace_id = self.var.trace_add("write", lambda *_: self.render())
+        self.bind("<Destroy>", self._remove_trace)
         self.render()
 
     def toggle(self, _=None):
+        if self.cget("state") == "disabled":
+            return "break"
+        self.focus_set()
         self.var.set(not self.var.get())
         if self.command:
             self.command()
+        return "break"
+
+    def _appearance(self, **values):
+        self.__dict__.update(values)
+        self.render()
+
+    def _remove_trace(self, event):
+        if event.widget is self:
+            self.var.trace_remove("write", self.trace_id)
 
     def render(self):
         self.delete("all")
-        p = self.px
-        w, h = (self.w, self.h)
-        r = h // 2
+        from PIL import ImageTk
+        scale = 4
+        w, h = self.w, self.h
+        image = Image.new("RGBA", (w * scale, h * scale))
+        draw = ImageDraw.Draw(image)
         val = bool(self.var.get())
-        bg_color = ACCENT_GREEN if val else "#cbd5e1"
-        self.create_arc((0, 0, h, h), start=90, extent=180, fill=bg_color, outline="")
-        self.create_arc((w - h, 0, w, h), start=270, extent=180, fill=bg_color, outline="")
-        self.create_rectangle((r, 0, w - r, h), fill=bg_color, outline="")
-        pad = p(2)
-        diameter = h - pad * 2
-        knob_x = w - pad - diameter if val else pad
-        self.create_oval(
-            (knob_x, pad, knob_x + diameter, pad + diameter), fill="#ffffff", outline=""
-        )
+        fill = (ACCENT_GREEN_HOVER if self.hovered else ACCENT_GREEN) if val else ("#b8c6c5" if self.hovered else "#d5dfdd")
+        margin = scale
+        draw.rounded_rectangle((margin, margin, w * scale - margin - 1, h * scale - margin - 1),
+                               radius=h * scale / 2, fill=fill,
+                               outline="#71b6a6" if self.focused else (fill if val else "#c4d1ce"),
+                               width=scale)
+        pad = max(2, self.px(3)) * scale
+        diameter = h * scale - 2 * pad
+        x = w * scale - pad - diameter if val else pad
+        draw.ellipse((x, pad + scale / 2, x + diameter, pad + diameter + scale / 2), fill="#9eafab")
+        draw.ellipse((x, pad, x + diameter, pad + diameter), fill="white")
+        self.photo = ImageTk.PhotoImage(image.resize((w, h), Image.Resampling.LANCZOS), master=self)
+        self.create_image(0, 0, anchor="nw", image=self.photo)
 
 
 class CardFrame(tk.Frame):

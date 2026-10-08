@@ -165,6 +165,28 @@ def main():
                 assert automation.winfo_toplevel() == ui.root
                 assert automation.winfo_ismapped() and not ui.tree.winfo_ismapped()
                 assert not hasattr(automation, "sessdata_var")
+                assert ui.workbench.nav_buttons["automation"].cget("bg") == "#2b4443"
+                assert ui.workbench.activity_button.winfo_rooty() > ui.workbench.nav_buttons["account"].winfo_rooty()
+                from desktop.widgets import ToggleSwitch
+                def switches(widget):
+                    return ([widget] if isinstance(widget, ToggleSwitch) else []) + [
+                        switch for child in widget.winfo_children() for switch in switches(child)]
+                switch = switches(automation)[0]
+                original = switch.var.get()
+                callback = Mock()
+                switch.command = callback
+                switch.toggle()
+                assert switch.var.get() != original
+                callback.assert_called_once()
+                switch.configure(state="disabled")
+                switch.toggle()
+                callback.assert_called_once()
+                assert switch.var.get() != original
+                switch.configure(state="normal")
+                switch.var.set(original)
+                assert switch.bind("<space>") and switch.bind("<Return>")
+                from PIL import ImageTk
+                assert ImageTk.getimage(switch.photo).getpixel((0, 0))[3] == 0
                 with patch("desktop.dialogs.save_login") as save_login, patch("desktop.dialogs.set_autostart", return_value=True):
                     automation.do_save()
                     save_login.assert_not_called()
