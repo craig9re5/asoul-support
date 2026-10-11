@@ -72,8 +72,9 @@ class QrSessionView:
         self.engine.dispatcher.submit(lambda: self.run_session(cancelled))
 
     def run_session(self, cancelled):
-        session = self.session_factory()
+        session = None
         try:
+            session = self.session_factory()
             url = session.generate()
             image = (
                 qrcode.make(url, box_size=1, border=4, image_factory=PilImage)
@@ -105,7 +106,8 @@ class QrSessionView:
         except Exception:
             self.post(cancelled, self.show_error)
         finally:
-            session.cancel()
+            if session is not None:
+                session.cancel()
 
     def show_qr(self, image):
         self.qr_image = ImageTk.PhotoImage(image)
@@ -135,6 +137,7 @@ class QrSessionView:
             self.on_login(cookies, account, context=context)
         except (OSError, ValueError, RuntimeError):
             self.status.set("登录已验证，但本机保存失败，请重试或检查文件权限")
+            self.refresh_button.configure(state="normal")
             return
         self.close()
 

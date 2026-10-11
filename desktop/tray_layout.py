@@ -178,6 +178,7 @@ def build_room_menu(self):
     )
     self.menu.add_command(label="🌐 打开直播间 (默认浏览器)", command=self.on_open_room)
     self.menu.add_separator()
+    self.menu.add_command(label="重连此直播间（只恢复看播）", command=self.on_reconnect_room)
     self.menu.add_command(label="💬 补齐弹幕任务", command=lambda: self.on_redo_task("danmaku"))
     self.menu.add_command(label="👍 补做点赞任务", command=lambda: self.on_redo_task("like"))
     self.menu.add_command(label="🔄 重新执行全部任务", command=lambda: self.on_redo_task("all"))

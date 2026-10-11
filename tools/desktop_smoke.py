@@ -20,6 +20,10 @@ def main():
         members = [{"name": f"测试主播{i}Viridis", "room": 2 * i, "uid": i} for i in range(1, 8)]
         initialize(root, members)
         engine = Engine(root, job=Mock())
+        engine.account = "模拟账号"
+        engine.account_checked_at = time.time()
+        from asoul_support.runtime import task_day
+        engine.tasks = {str(member["room"]): {"day": task_day(), "updated": time.time()} for member in members}
         engine.statuses = {str(member["room"]): {"live_status": 1, "title": "超长直播标题\n" * 30}
                            for member in members}
         engine.status_times = {str(member["room"]): time.time() for member in members}
@@ -78,6 +82,8 @@ def main():
                     assert all(ui.tree.items[str(member["room"])]["title"].cget("anchor") == "e" for member in members)
                     capacities.append((width, height, canvas.winfo_height() // row_frames[0].winfo_height()))
                     for button in (ui.pause_button, ui.safety_button, ui.workbench.check_button):
+                        if not button.winfo_manager():
+                            continue
                         assert button.winfo_height() >= button.winfo_reqheight()
                         assert button.winfo_y() + button.winfo_height() <= toolbar.winfo_height()
                     assert ui.summary_label.winfo_width() >= ui.summary_label.winfo_reqwidth()
@@ -108,7 +114,7 @@ def main():
                 ui.refresh()
                 ui.refresh()
                 assert "看播收益待核验" in ui.summary.get()
-                assert "看播收益待核验" in ui.footer.get()
+                assert "核对看播收益" in ui.footer.get()
                 assert ui.workbench.detail_warning.winfo_manager() == "pack"
                 assert "未增长" in ui.workbench.detail_warning.cget("text")
                 assert ui.tree.items["2"]["phase"].cget("fg") == "#a65c00"
@@ -132,7 +138,7 @@ def main():
                 assert ui.tree.items["2"]["phase"].cget("fg") == "#a65c00"
                 ui.tray.notify.assert_called_once()
                 with patch.object(engine, "reconnect_room", return_value=(False, "模拟网络失败，请重试。")) as reconnect, \
-                     patch.object(engine.dispatcher, "submit", side_effect=lambda callback: callback()):
+                     patch.object(engine.dispatcher, "submit_control", side_effect=lambda callback: callback() or Mock()):
                     ui.workbench.reconnect_button.invoke()
                     assert ui.reconnect_pending
                     ui.on_reconnect_room()
@@ -159,7 +165,7 @@ def main():
                 engine.safety = {"blocked": True, "kind": "network", "until": time.time() + 60,
                                  "reason": "心跳连接异常"}
                 ui.refresh()
-                assert ui.safety_button.cget("text") == "冷却中 · 自动恢复"
+                assert ui.safety_button.cget("text") == "查看冷却说明"
                 engine.safety = {"blocked": True, "kind": "auth", "reason": "登录失效"}
                 ui.refresh()
                 assert ui.safety_button.cget("text") == "重新扫码登录"
@@ -169,6 +175,26 @@ def main():
                 engine.safety = {"blocked": False}
                 ui.refresh()
                 assert ui.safety_button.cget("state") == "disabled"
+                assert not ui.safety_button.winfo_manager()
+                # Detail and menu guards agree; queued actions cannot be duplicated.
+                with patch.object(engine.dispatcher, "submit") as submit:
+                    ui.on_redo_task("all")
+                    ui.on_redo_task("all")
+                    submit.assert_called_once()
+                    assert ui.room_actions[2]["pending"]
+                    assert ui.workbench.redo_button.cget("state") == "disabled"
+                    assert ui.menu.entrycget(3, "state") == "disabled"
+                    assert "执行" in ui.workbench.action_hint.cget("text")
+                    with patch.object(engine.application, "redo", side_effect=RuntimeError("synthetic-secret")):
+                        submit.call_args.args[0]()
+                    ui.refresh()
+                    assert not ui.room_actions[2]["pending"]
+                    assert "RuntimeError" in ui.workbench.detail_warning.cget("text")
+                    assert "synthetic-secret" not in ui.workbench.detail_warning.cget("text")
+                    ui.refresh()
+                    assert "RuntimeError" in ui.workbench.detail_warning.cget("text")
+                ui.room_actions.clear()
+                ui.task_notice = ("", 0)
                 settings = SettingsDialog(ui.root, engine, ui.px, lambda: None)
                 settings.update_idletasks()
                 assert settings.e_sess.cget("show")
@@ -255,10 +281,36 @@ def main():
                 calls.assert_called_once()
                 add = AddMemberDialog(ui.root, engine, ui.px, lambda: None)
                 add.update_idletasks()
+                add.query_var.set("synthetic-query")
+                with patch.object(engine.dispatcher, "submit", side_effect=lambda task: task() or Mock()), \
+                     patch.object(engine.dispatcher, "post", side_effect=lambda callback: callback()), \
+                     patch.object(engine.application, "resolve", side_effect=RuntimeError("synthetic-secret")):
+                    add.do_search()
+                    assert not add.searching
+                    assert add.search_btn.cget("state") == "normal"
+                    assert "重试" in add.preview_text.get() and "synthetic-secret" not in add.preview_text.get()
+                add.query_var.set("changed-input")
+                add.on_search_done({"room": 999}, query="old-input")
+                assert "忽略" in add.preview_text.get()
+                assert add.add_btn.cget("state") == "disabled"
                 add.destroy()
+                add.on_search_done(None)
                 with patch.object(engine.dispatcher, "submit"):
                     sync = SyncMedalsDialog(ui.root, engine, ui.px, lambda: None)
                 sync.update_idletasks()
+                sync.show_fetch_error()
+                assert sync.btn_retry.cget("state") == "normal"
+                with patch.object(engine.dispatcher, "submit") as submit:
+                    sync.btn_retry.invoke()
+                    sync.btn_retry.invoke()
+                    submit.assert_called_once()
+                sync.on_no_credentials()
+                with patch.object(ui, "open_settings") as login:
+                    sync.btn_goto.invoke()
+                    ui.root.update()
+                    login.assert_called_once_with(focus_auth=True, scan=True)
+                with patch.object(engine.dispatcher, "submit"):
+                    sync = SyncMedalsDialog(ui.root, engine, ui.px, lambda: None)
                 sync.display_medals([], 0)
                 sync.destroy()
             finally:

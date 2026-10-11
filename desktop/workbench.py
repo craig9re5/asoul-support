@@ -1,10 +1,12 @@
 """Workbench layout. All user actions keep the existing application/engine adapters."""
 
 import os
+import time
 import tkinter as tk
 from .avatars import AvatarLoader
 from .room_list import RoomList
 from .presentation import phase_label, gain_label
+from .interaction import action_reason
 from .widgets import ModernButton, FONT_FAMILY, icon_image, navigation_icon
 from .dialogs import SettingsPanel
 
@@ -104,6 +106,9 @@ class Workbench:
         ModernButton(action_row, text="打开直播间", command=ui.on_open_room, px=p).pack(side="left")
         self.redo_button = ModernButton(action_row, text="补齐任务", command=lambda: ui.on_redo_task("all"), px=p)
         self.redo_button.pack(side="left", padx=(p(8),0))
+        self.action_hint = label(action, "请选择主播后操作", size=8, color=MUTED)
+        self.action_hint.configure(wraplength=p(275))
+        self.action_hint.pack(fill="x", pady=(p(6), 0))
         self.settings_host = tk.Frame(self.body, bg=BG)
 
     def _build_sidebar(self, shell):
@@ -179,7 +184,7 @@ class Workbench:
         ui, p = self.ui, self.ui.px
         self.toolbar = tk.Frame(self.body, bg="#e9f4ed", padx=p(8), pady=p(5))
         self.toolbar.pack(fill="x", pady=(0,p(10)))
-        ui.safety_button = ModernButton(self.toolbar, text="解除异常暂停", command=ui.on_safety_resume,
+        ui.safety_button = ModernButton(self.toolbar, text="处理异常", command=ui.on_recovery_action,
                                        px=p, state="disabled")
         ui.safety_button.pack(side="right", padx=(p(6),0))
         ui.pause_button = ModernButton(self.toolbar, text="暂停挂机", command=lambda: ui.commands.put("toggle"),
@@ -228,6 +233,12 @@ class Workbench:
     def render_detail(self):
         selected = self.ui.tree.selection()
         row = self.ui.rows_cache.get(selected[0], {}) if selected else {}
+        notice_key = (row.get("room"), row.get("connection_warning"), row.get("watch_warning"))
+        previous = getattr(self, "detail_notice_key", None)
+        if notice_key != previous and (previous is None or notice_key[0] != previous[0]
+                                       or any(notice_key[1:])):
+            self.detail_canvas.yview_moveto(0)
+        self.detail_notice_key = notice_key
         self.detail_title.configure(text=(row.get("name", "选择主播") + " · 今日任务"))
         self.detail_phase.configure(text=phase_label(row))
         self.detail_live_title.configure(text=row.get("title", ""))
@@ -244,17 +255,37 @@ class Workbench:
         last = time.strftime("%H:%M:%S", time.localtime(heartbeat)) if heartbeat else "暂无成功心跳"
         self.detail_heartbeat.configure(text=f"最近心跳：{last}" + ("\n"+row["task_error"] if row.get("task_error") else ""))
         warning = "\n".join(message for message in (row.get("connection_warning"), row.get("watch_warning")) if message)
+        operation = self.ui.room_actions.get(row.get("room"), {})
+        operation_message = operation.get("message", "")
+        if operation.get("pending"):
+            elapsed = max(0, int(time.monotonic() - operation["started"]))
+            operation_message += f" · 已等待 {elapsed} 秒；请勿重复提交。"
+        if operation_message:
+            warning = "\n".join(message for message in (warning, operation_message) if message)
         if warning:
             self.detail_warning.configure(text="⚠ " + warning)
             self.detail_warning.pack(after=self.detail_phase, fill="x", pady=(0, self.ui.px(12)))
         else:
             self.detail_warning.pack_forget()
-        enabled = row.get("live_status") == 1 and not self.snap.get("paused") and not self.snap.get("safety",{}).get("blocked")
-        self.redo_button.configure(state="normal" if enabled else "disabled")
-        pending = getattr(self.ui, "reconnect_pending", False)
-        self.reconnect_button.configure(state="normal" if row.get("reconnect_allowed") and not pending else "disabled",
+        redo_reason = action_reason(self.snap, row, "redo", operation.get("pending", False))
+        self.redo_button.configure(state="disabled" if redo_reason else "normal", text="补齐中…" if operation.get("pending") and operation.get("kind") == "redo" else "补齐任务")
+        pending = operation.get("pending", False) and operation.get("kind") == "reconnect"
+        reconnect_reason = action_reason(self.snap, row, "reconnect", operation.get("pending", False) or pending)
+        self.reconnect_button.configure(state="disabled" if reconnect_reason else "normal",
                                         text="重连中…" if row.get("reconnecting") or pending else "重连此直播间")
+        reasons = list(dict.fromkeys(reason for reason in (reconnect_reason, redo_reason) if reason))
+        self.action_hint.configure(text="\n".join(reasons))
+        self._render_menu(row, operation.get("pending", False))
         message = row.get("reconnect_message", "")
         if message and not warning:
             self.detail_warning.configure(text=message)
             self.detail_warning.pack(after=self.detail_phase, fill="x", pady=(0, self.ui.px(12)))
+
+    def _render_menu(self, row, pending):
+        # Right-click and detail buttons use the same policy, including keyboard invocation.
+        menu = getattr(self.ui, "menu", None)
+        if menu is None:
+            return
+        for index, action in ((0, "open"), (2, "reconnect"), (3, "redo"), (4, "redo"), (5, "redo"), (6, "wear")):
+            reason = action_reason(self.snap, row, action, pending)
+            menu.entryconfigure(index, state="disabled" if reason else "normal")

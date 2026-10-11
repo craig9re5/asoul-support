@@ -16,6 +16,42 @@ from asoul_support.runtime import update_json, save_login
 from .widgets import *
 
 
+def apply_saved_settings(panel):
+    """Keep worker shutdown/reload off Tk; report saved versus applied separately."""
+    dispatcher = getattr(panel.engine, "dispatcher", None)
+    if dispatcher is None:
+        panel.engine.reload_settings()
+        panel.on_saved()
+        return
+    panel.applying = True
+    if hasattr(panel, "save_button"):
+        panel.save_button.configure(state="disabled", text="正在应用…")
+        panel.save_status.set("已保存，正在应用，请等待结果。")
+    def apply():
+        try:
+            panel.engine.reload_settings()
+            message = "已保存并应用。"
+            ok = True
+        except Exception as exc:
+            message = f"已保存，但应用失败（{type(exc).__name__}），请重试保存或查看活动记录。"
+            ok = False
+        def finish():
+            panel.applying = False
+            if hasattr(panel, "winfo_exists") and not panel.winfo_exists():
+                return
+            if hasattr(panel, "save_button"):
+                panel.save_button.configure(state="normal", text="保存账号" if panel.scope == "account" else "保存设置")
+                panel.save_status.set(message)
+            if ok:
+                panel.on_saved()
+        dispatcher.post(finish)
+    if dispatcher.submit_control(apply) is None:
+        panel.applying = False
+        if hasattr(panel, "save_button"):
+            panel.save_button.configure(state="normal")
+            panel.save_status.set("已保存，程序正在退出；下次启动应用设置。")
+
+
 class SettingsPanel(tk.Frame):
     """Inline settings pages; automation and account writes are independently scoped."""
 
@@ -23,6 +59,7 @@ class SettingsPanel(tk.Frame):
         super().__init__(parent, bg=BG_WINDOW)
         self.engine, self.px, self.on_saved = engine, px, on_saved
         self.scope = scope
+        self.applying = False
         self.qr_panel = None
         p = px
         config, _ = load_config(engine.root)
@@ -89,6 +126,9 @@ class SettingsPanel(tk.Frame):
     def open_qr_login(self):
         from .qr_dialog import QrLoginPanel
 
+        if self.applying:
+            self.save_status.set("正在应用已保存的登录信息，请等待结果。")
+            return
         if self.qr_panel is not None and self.qr_panel.winfo_exists():
             return
         self.qr_panel = QrLoginPanel(self.qr_host, self.engine, self.px, self.on_qr_login)
@@ -106,13 +146,12 @@ class SettingsPanel(tk.Frame):
             self.engine.root / "credentials.json",
             **options,
         )
-        self.engine.reload_settings()
         self.sessdata_var.set(cookies["SESSDATA"])
         self.jct_var.set(cookies["bili_jct"])
         self.verified_pair = (cookies["SESSDATA"], cookies["bili_jct"])
         self.verified_at = time.monotonic()
         self.set_auth_status(f"扫码登录成功：{account}，已保存。", "#059669")
-        self.on_saved()
+        apply_saved_settings(self)
 
     def do_verify_login(self, on_success=None):
         if getattr(self, "verifying", False):
@@ -180,6 +219,8 @@ class SettingsPanel(tk.Frame):
             )
 
     def do_save(self):
+        if getattr(self, "applying", False):
+            return
         scope = getattr(self, "scope", "all")
         automation = scope in ("automation", "all")
         account = scope in ("account", "all")
@@ -225,7 +266,6 @@ class SettingsPanel(tk.Frame):
                 save_login(new_sess, new_jct, self.engine.root / "credentials.json")
             if changes:
                 update_json(self.engine.root / "settings.json", change, {})
-            self.engine.reload_settings()
         except (OSError, ValueError, RuntimeError):
             messagebox.showerror(
                 "保存失败", "请检查本机文件权限和配置，设置尚未全部应用。", parent=self
@@ -235,8 +275,7 @@ class SettingsPanel(tk.Frame):
             messagebox.showwarning(
                 "部分设置未应用", "设置已保存，但 Windows 自启动设置失败。", parent=self
             )
-        self.on_saved()
-        self.save_status.set("已保存并应用")
+        apply_saved_settings(self)
 
 
 # Keep the historical import and business-method API for external callers.
@@ -343,27 +382,42 @@ class AddMemberDialog(tk.Toplevel):
             self.preview_label.configure(fg=TEXT_MUTED)
 
     def do_search(self):
+        if getattr(self, "searching", False):
+            return
         query = self.query_var.get().strip()
         if not query:
             self.preview_text.set("⚠️ 请先输入房间号、UID 或直播间链接后再查询")
             self.preview_label.configure(fg="#d97706")
             return
         self.last_query = query
+        self.searching = True
+        self.resolved_info = None
+        self.add_btn.configure(state="disabled")
         self.search_btn.configure(state="disabled")
         self.preview_text.set("⏳ 正在查询 B 站接口…")
         self.preview_label.configure(fg=TEXT_MUTED)
 
         def query_thread():
-            cookies = read_json(self.engine.root / "credentials.json", {})
-            info = self.engine.application.resolve(query)
-            self.engine.dispatcher.post(lambda: self.on_search_done(info))
+            try:
+                info, error = self.engine.application.resolve(query), ""
+            except Exception as exc:
+                info, error = None, f"查询失败（{type(exc).__name__}），请核对网络后重试；登录失效可在账号管理扫码。"
+            self.engine.dispatcher.post(lambda: self.on_search_done(info, query=query, error=error))
 
         self.engine.dispatcher.submit(query_thread)
 
-    def on_search_done(self, info):
+    def on_search_done(self, info, *, query=None, error=""):
+        if not self.winfo_exists():
+            return
+        self.searching = False
         self.search_btn.configure(state="normal")
+        if query is not None and query != self.query_var.get().strip():
+            self.resolved_info = None
+            self.add_btn.configure(state="disabled")
+            self.preview_text.set("输入已改变，旧查询结果已忽略，请重新查询。")
+            return
         if not info:
-            self.preview_text.set("❌ 未查询到对应主播，请检查输入的房间号或 UID。")
+            self.preview_text.set(error or "❌ 未查询到对应主播，请检查输入的房间号或 UID。")
             self.preview_label.configure(fg="#dc2626")
             self.add_btn.configure(state="disabled")
             self.resolved_info = None
@@ -393,8 +447,8 @@ class AddMemberDialog(tk.Toplevel):
             return
         try:
             self.engine.application.add_members([self.resolved_info])
-        except ValueError as exc:
-            messagebox.showerror("添加失败", str(exc), parent=self)
+        except (OSError, ValueError, RuntimeError) as exc:
+            messagebox.showerror("添加失败", f"无法保存主播（{type(exc).__name__}），请核对配置和文件权限后重试。", parent=self)
             return
         self.on_added()
         self.destroy()
@@ -475,6 +529,21 @@ class SyncMedalsDialog(tk.Toplevel):
             self.btn_row, text="取消", primary=False, command=self.destroy, px=p
         )
         self.btn_cancel.pack(side="right", padx=(0, p(8)))
+        self.btn_retry = ModernButton(self.btn_row, text="重新查询", command=self.start_fetch, px=p)
+        self.btn_retry.pack(side="left", padx=(p(8), 0))
+        self.fetching = False
+        self.start_fetch()
+
+    def start_fetch(self):
+        if self.fetching:
+            return
+        self.fetching = True
+        self.status_var.set("正在查询粉丝牌，请稍候…")
+        self.btn_retry.configure(state="disabled")
+        self.btn_import.configure(state="disabled")
+        self.btn_select_all.configure(state="disabled")
+        self.tree.delete(*self.tree.get_children())
+        self.items_data = []
         self.engine.dispatcher.submit(self.fetch_medals)
 
     def on_space_key(self):
@@ -494,10 +563,16 @@ class SyncMedalsDialog(tk.Toplevel):
             self.tree.item(item_id, values=vals)
 
     def on_no_credentials(self):
-        self.status_var.set("⚠️ 尚未配置登录凭证，请先设置登录！")
+        if not self.winfo_exists():
+            return
+        self.fetching = False
+        self.btn_retry.configure(state="normal")
+        self.status_var.set("⚠️ 登录信息缺失或无法读取，请点击扫码登录。")
+        if hasattr(self, "btn_goto"):
+            return
         self.btn_goto = ModernButton(
             self.btn_row,
-            text="🔑 前往配置凭证",
+            text="扫码登录",
             primary=True,
             command=self.open_settings_and_close,
             px=self.px,
@@ -508,25 +583,33 @@ class SyncMedalsDialog(tk.Toplevel):
         self.destroy()
         if hasattr(self.parent, "open_settings"):
             self.parent.open_settings(focus_auth=True)
+        else:
+            self.parent.event_generate("<<OpenAccountLogin>>")
 
     def fetch_medals(self):
-        cookies = read_json(self.engine.root / "credentials.json", {})
+        try:
+            cookies = read_json(self.engine.root / "credentials.json", {})
+        except (OSError, ValueError, RuntimeError):
+            self.engine.dispatcher.post(self.on_no_credentials)
+            return
         if not cookies.get("SESSDATA") or not cookies.get("bili_jct"):
             self.engine.dispatcher.post(self.on_no_credentials)
             return
         try:
             all_medals = self.engine.application.medals()
-        except (OSError, ValueError, RuntimeError):
+            current_members = read_json(self.engine.root / "members.json", [])
+            current_rooms = {m["room"] for m in current_members}
+            unmonitored = [m for m in all_medals if m["room"] not in current_rooms]
+        except Exception:
             self.engine.dispatcher.post(self.show_fetch_error)
             return
-        current_members = read_json(self.engine.root / "members.json", [])
-        current_rooms = {m["room"] for m in current_members}
-        unmonitored = [m for m in all_medals if m["room"] not in current_rooms]
         self.engine.dispatcher.post(lambda: self.display_medals(unmonitored, len(all_medals)))
 
     def display_medals(self, unmonitored, total):
         if not self.winfo_exists():
             return
+        self.fetching = False
+        self.btn_retry.configure(state="normal")
         if total == 0:
             self.status_var.set(
                 "当前账号未查询到任何粉丝勋章（请确认登录凭证有效且账号拥有粉丝牌）。"
@@ -551,7 +634,9 @@ class SyncMedalsDialog(tk.Toplevel):
 
     def show_fetch_error(self):
         if self.winfo_exists():
-            self.status_var.set("查询失败，请检查登录和网络后重新打开。")
+            self.fetching = False
+            self.btn_retry.configure(state="normal")
+            self.status_var.set("查询失败，请检查登录及网络，点击“重新查询”重试。")
             self.btn_cancel.configure(text="关闭")
 
     def on_click_item(self, event):
@@ -577,8 +662,8 @@ class SyncMedalsDialog(tk.Toplevel):
             return
         try:
             self.engine.application.add_members(selected)
-        except ValueError as exc:
-            messagebox.showerror("导入失败", str(exc), parent=self)
+        except (OSError, ValueError, RuntimeError) as exc:
+            messagebox.showerror("导入失败", f"无法保存关注列表（{type(exc).__name__}），请核对文件权限后重试。", parent=self)
             return
         messagebox.showinfo("导入成功", f"成功导入 {len(selected)} 位主播到监控列表！", parent=self)
         self.on_synced()

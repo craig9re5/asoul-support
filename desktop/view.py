@@ -1,11 +1,11 @@
 from .tray_layout import configure_table_style, build_room_menu
 from .workbench import Workbench
 from .presentation import phase_label
+from .interaction import action_reason, recovery_route
 from desktop.dispatch import Dispatcher
 import os
 import logging
 import queue
-import subprocess
 import threading
 import time
 import tkinter as tk
@@ -30,6 +30,12 @@ class TrayUI:
         self.engine = engine
         self.commands = queue.Queue()
         self.rows_cache = {}
+        self.room_actions = {}
+        self.control_actions = set()
+        self.control_messages = {}
+        self.last_snapshot = None
+        self.closing = False
+        self.ui_error = ""
         if os.name == "nt":
             import ctypes
 
@@ -43,6 +49,7 @@ class TrayUI:
                 "执行失败", "后台操作失败，请查看日志并重试", parent=self.root
             ),
         )
+        self.root.bind("<<OpenAccountLogin>>", lambda _: self.open_settings(focus_auth=True, scan=True))
         self.scale = self.root.winfo_fpixels("1i") / 96.0
         self.px = lambda value: max(1, round(value * self.scale))
         p = self.px
@@ -103,14 +110,20 @@ class TrayUI:
         self.root.after_idle(self.root.attributes, "-topmost", False)
 
     def open_add_member(self):
+        if self.closing:
+            return
         self.show()
         AddMemberDialog(self.root, self.engine, self.px, lambda: self.commands.put("check"))
 
     def open_sync_medals(self):
+        if self.closing:
+            return
         self.show()
         SyncMedalsDialog(self.root, self.engine, self.px, lambda: self.commands.put("check"))
 
     def open_settings(self, focus_auth=False, scan=False):
+        if self.closing:
+            return
         self.show()
         dialog = self.workbench.show_page("account" if focus_auth or scan else "automation")
         if scan:
@@ -127,9 +140,75 @@ class TrayUI:
         item = self.tree.identify_row(event.y)
         if item and item != "_empty":
             self.tree.selection_set(item)
+            self.workbench.render_detail()
             self.menu.post(event.x_root, event.y_root)
         else:
             self.tree.selection_remove(self.tree.selection())
+
+    def _selected_action(self, action):
+        selected = self.tree.selection()
+        row = self.rows_cache.get(selected[0], {}) if selected else {}
+        state = self.room_actions.get(row.get("room"), {})
+        snap = self.last_snapshot or {}
+        reason = action_reason({**snap, "closing": self.closing}, row, action, state.get("pending", False))
+        if reason:
+            self.task_notice = (reason, time.time() + 20)
+            return None
+        return row
+
+    def _submit_room_action(self, row, kind, operation, *, control=False):
+        room, name = row["room"], row["name"]
+        self.room_actions[room] = {"kind": kind, "pending": True, "started": time.monotonic(),
+                                   "message": {"redo": "正在补齐任务", "wear": "正在佩戴粉丝牌",
+                                               "reconnect": "正在请求重连"}[kind]}
+        if kind == "reconnect":
+            self.reconnect_pending = True
+        self.workbench.render_detail()
+        def run():
+            try:
+                if self.closing or self.engine.paused:
+                    message = "程序正在退出或挂机已暂停，尚未开始的操作已取消。"
+                else:
+                    message = operation()
+            except Exception as exc:
+                logging.error("Room action failed kind=%s error=%s", kind, type(exc).__name__)
+                message = f"操作未成功（{type(exc).__name__}），请重试；登录失效可在账号管理扫码。"
+            self.commands.put(("room_action_done", room, name, kind, message))
+        submit = self.engine.dispatcher.submit_control if control else self.engine.dispatcher.submit
+        if submit(run) is None:
+            self.commands.put(("room_action_done", room, name, kind, "程序正在退出，操作未提交。"))
+
+    def _submit_control(self, key, operation, message):
+        if key in self.control_actions or self.closing and key != "exit":
+            return
+        self.control_actions.add(key)
+        self.control_messages[key] = (message, time.monotonic())
+        self.task_notice = (message, time.time() + 20)
+        def run():
+            try:
+                returned = operation()
+                ok, result = returned if isinstance(returned, tuple) and len(returned) == 2 and isinstance(returned[0], bool) else (True, message.replace("正在", "已"))
+            except Exception as exc:
+                logging.error("Desktop control failed action=%s error=%s", key, type(exc).__name__)
+                ok, result = False, f"操作失败（{type(exc).__name__}），可重试或查看活动记录。"
+            self.commands.put(("control_done", key, ok, result))
+        if self.engine.dispatcher.submit_control(run) is None:
+            self.commands.put(("control_done", key, False, "程序正在退出，操作未提交。"))
+
+    def on_recovery_action(self):
+        route = getattr(self, "recovery_target", {})
+        action = route.get("action")
+        if action == "login":
+            self.open_settings(focus_auth=True, scan=True)
+        elif action == "safety":
+            self.on_safety_resume()
+        elif action in ("resume", "check", "logs", "refresh"):
+            self.commands.put(action)
+        elif action == "room":
+            self.workbench.show_page("monitor")
+            self.tree.selection_set(str(route["room"]))
+            self.workbench.detail_canvas.yview_moveto(0)
+            self.workbench.render_detail()
 
     def on_open_room(self):
         selected = self.tree.selection()
@@ -137,79 +216,35 @@ class TrayUI:
             webbrowser.open(f"https://live.bilibili.com/{selected[0]}")
 
     def on_redo_task(self, task_type):
-        selected = self.tree.selection()
-        if not selected or selected[0] == "_empty":
-            return
-        room_id = int(selected[0])
-        row = self.rows_cache.get(str(room_id))
+        row = self._selected_action("redo")
         if not row:
             return
-        uid = row.get("uid")
-        name = row.get("name", "")
-        cookies = read_json(self.engine.root / "credentials.json", {})
-        if not cookies.get("SESSDATA") or not cookies.get("bili_jct"):
-            messagebox.showwarning(
-                "提示", "尚未配置有效凭证！请先在【⚙️ 系统设置】中配置凭证。", parent=self.root
-            )
-            return
-        self.summary.set(f"正在为【{name}】执行补齐任务…")
-
-        def task_thread():
-            try:
-                res = self.engine.application.redo(room_id, uid, task_type)
-            except Exception as exc:
-                res = {"success": False, "error": f"执行失败（{type(exc).__name__}）"}
-            self.commands.put(("task_done", name, res))
-
-        self.engine.dispatcher.submit(task_thread)
+        self._submit_room_action(row, "redo", lambda: format_task_result(
+            row["name"], self.engine.application.redo(row["room"], row.get("uid"), task_type)))
 
     def on_reconnect_room(self):
-        selected = self.tree.selection()
-        row = self.rows_cache.get(selected[0], {}) if selected else {}
-        if not row.get("reconnect_allowed") or getattr(self, "reconnect_pending", False):
-            return
-        room, name = row["room"], row["name"]
-        self.reconnect_pending = True
-        self.workbench.reconnect_button.configure(state="disabled", text="正在请求重连…")
-        def reconnect():
-            try:
-                ok, message = self.engine.reconnect_room(room)
-            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-                logging.exception("Room reconnect failed")
-                ok, message = False, f"重连未成功（{type(exc).__name__}），请稍后重试。"
-            self.commands.put(("reconnect_done", name, ok, message))
-        self.engine.dispatcher.submit(reconnect)
-
-    def on_wear_medal(self):
-        selected = self.tree.selection()
-        if not selected or selected[0] == "_empty":
-            return
-        room_id = int(selected[0])
-        row = self.rows_cache.get(str(room_id))
+        row = self._selected_action("reconnect")
         if not row:
             return
-        uid = row.get("uid")
-        cookies = read_json(self.engine.root / "credentials.json", {})
-        if not cookies.get("SESSDATA") or not cookies.get("bili_jct"):
-            messagebox.showwarning(
-                "提示", "尚未配置有效凭证！请先在【⚙️ 系统设置】中配置凭证。", parent=self.root
-            )
-            return
+        self._submit_room_action(row, "reconnect", lambda: self.engine.reconnect_room(row["room"])[1], control=True)
 
+    def on_wear_medal(self):
+        row = self._selected_action("wear")
+        if not row:
+            return
         def wear_thread():
+            uid = row.get("uid")
             medals = self.engine.application.call(
                 "get_my_medals", *self.engine.application.credentials()
             )
             info = medals.get(uid) or medals.get(str(uid))
             if not info or not info.get("medal_id"):
-                self.commands.put(("wear_done", row.get("name", ""), "no_medal"))
-                return
+                return "没有可佩戴的粉丝牌，请先同步粉丝牌。"
             ok = self.engine.application.call(
                 "wear_medal", info["medal_id"], *self.engine.application.credentials()
             )
-            self.commands.put(("wear_done", row.get("name", ""), "ok" if ok else "fail"))
-
-        self.engine.dispatcher.submit(wear_thread)
+            return "粉丝牌已佩戴。" if ok else "佩戴失败，请核对登录状态后重试。"
+        self._submit_room_action(row, "wear", wear_thread)
 
     def on_remove_member(self):
         selected = self.tree.selection()
@@ -224,12 +259,13 @@ class TrayUI:
             parent=self.root,
         ):
             return
-        self.engine.application.remove_member(room_id)
-        self.commands.put("check")
+        self._submit_control("remove", lambda: (self.engine.application.remove_member(room_id),
+                                              self.engine.check_now()), "正在移除主播…")
 
     def _callback_error(self, kind, value, traceback):
         logging.error("Tk callback failed", exc_info=(kind, value, traceback))
-        self.summary.set("界面操作异常，已记录日志；后台监控继续运行")
+        self.ui_error = "界面操作失败，请重试界面。"
+        self.summary.set(self.ui_error)
 
     def refresh(self):
         if self.closed:
@@ -238,7 +274,17 @@ class TrayUI:
             self._read_commands()
             if self.closed:
                 return
-            snap = self.engine.snapshot()
+            snap = self.engine.snapshot(blocking=False)
+            if snap is None:
+                if self.last_snapshot is None:
+                    self.summary.set("后台正在启动，界面可继续操作。")
+                    return
+                snap = {**self.last_snapshot, "engine_busy": True}
+            else:
+                snap["engine_busy"] = False
+            snap["closing"] = self.closing
+            snap["ui_error"] = self.ui_error
+            self.last_snapshot = snap
             self._render_overview(snap)
             self._render_rows(snap)
             self.workbench.render(snap)
@@ -246,7 +292,14 @@ class TrayUI:
             self._notify_watch_warnings(snap)
         except Exception:
             logging.exception("Desktop refresh failed")
+            self.ui_error = "界面刷新失败，正在自动重试。"
             self.summary.set("界面刷新失败，稍后自动重试；请查看日志")
+            # Preserve a visible recovery entry even when rendering itself failed.
+            if isinstance(getattr(self, "workbench", None), Workbench):
+                self.recovery_target = recovery_route({"ui_error": self.ui_error})
+                self.safety_button.configure(text="重试界面", state="normal")
+                if not self.safety_button.winfo_manager():
+                    self.safety_button.pack(side="right", before=self.pause_button, padx=(self.px(6), 0))
         finally:
             if not self.closed:
                 self.root.after(1000, self.refresh)
@@ -291,36 +344,64 @@ class TrayUI:
                 elif action == "task_done":
                     _, name, res = cmd
                     self.task_notice = (format_task_result(name, res), time.time() + 20)
-                    self.engine.check_now()
+                    self.commands.put("check")
                 elif action == "reconnect_done":
                     _, name, ok, message = cmd
                     self.reconnect_pending = False
                     self.task_notice = (f"【{name}】{message}", time.time() + 20)
+                elif action == "room_action_done":
+                    _, room, name, kind, message = cmd
+                    self.room_actions[room].update(pending=False, message=message)
+                    if kind == "reconnect":
+                        self.reconnect_pending = any(state.get("pending") and state.get("kind") == "reconnect"
+                                                     for state in self.room_actions.values())
+                    self.task_notice = (f"【{name}】{message}", time.time() + 20)
+                    if kind != "reconnect":
+                        self.commands.put("check")
+                elif action == "control_done":
+                    _, key, ok, message = cmd
+                    self.control_actions.discard(key)
+                    self.control_messages.pop(key, None)
+                    self.task_notice = (message, time.time() + 20)
+                    if key == "exit":
+                        if ok:
+                            self.closed = True
+                            self.tray.stop()
+                            self.root.destroy()
+                            return
+                        self.closing = False
+                    self.tray.update_menu()
                 elif action == "wear_done":
                     _, name, res = cmd
                     if res == "ok":
-                        self.summary.set(f"已佩戴【{name}】粉丝牌！")
+                        self.task_notice = (f"已佩戴【{name}】粉丝牌！", time.time() + 20)
                     elif res == "no_medal":
-                        self.summary.set(f"未拥有【{name}】的粉丝勋章，无法佩戴")
+                        self.task_notice = (f"未拥有【{name}】的粉丝勋章，无法佩戴", time.time() + 20)
                     else:
-                        self.summary.set(f"佩戴【{name}】粉丝牌失败，请稍后重试")
-                    self.engine.check_now()
+                        self.task_notice = (f"佩戴【{name}】粉丝牌失败，请稍后重试", time.time() + 20)
+                    self.commands.put("check")
+                continue
+            if self.closing and cmd not in {"exit", "show", "logs"}:
                 continue
             if cmd == "exit":
-                self.closed = True
-                self.engine.close()
-                self.tray.stop()
-                self.root.destroy()
-                return
+                self.closing = True
+                for panel in self.workbench.settings_pages.values():
+                    panel.deactivate()
+                def exit_cleanly():
+                    self.engine.close()
+                    self.engine.dispatcher.wait_for_io()
+                self._submit_control("exit", exit_cleanly, "正在退出，等待已提交操作结束…")
+                continue
             if cmd == "show":
                 self.show()
+            elif cmd == "refresh":
+                self.ui_error = ""
             elif cmd in {"toggle", "pause", "resume"}:
-                self.engine.set_paused(
-                    not self.engine.paused if cmd == "toggle" else cmd == "pause"
-                )
-                self.tray.update_menu()
+                paused = not self.engine.paused if cmd == "toggle" else cmd == "pause"
+                self._submit_control("pause", lambda value=paused: self.engine.set_paused(value),
+                                     "正在暂停挂机…" if paused else "正在恢复挂机…")
             elif cmd == "check":
-                self.engine.check_now()
+                self._submit_control("check", self.engine.check_now, "正在请求检查…")
             elif cmd == "add_member":
                 self.open_add_member()
             elif cmd == "sync_medals":
@@ -356,13 +437,7 @@ class TrayUI:
         ):
             return
 
-        def recover():
-            ok, message = self.engine.resume_safety(confirmed=True)
-            self.engine.dispatcher.post(
-                lambda: messagebox.showinfo("账号保护", message, parent=self.root)
-            )
-
-        self.engine.dispatcher.submit(recover)
+        self._submit_control("safety", lambda: self.engine.resume_safety(confirmed=True), "正在检查账号并解除保护暂停…")
 
     def _render_overview(self, snap):
         active = sum(row.get("heartbeat_healthy", row["active"] and not row.get("heartbeat_stale")) for row in snap["rows"])
@@ -390,6 +465,10 @@ class TrayUI:
         notice, until = getattr(self, "task_notice", ("", 0))
         if time.time() < until:
             self.summary.set(notice)
+        if self.control_messages:
+            key = next((key for key in ("exit", "pause", "safety", "remove", "check") if key in self.control_messages))
+            message, started = self.control_messages[key]
+            self.summary.set(message + f" · 已等待 {max(0, int(time.monotonic()-started))} 秒")
         self.tray.title = f"LiveSupport · {title}"
         account = snap.get("account", "")
         if account and snap.get("account_confirmed"):
@@ -406,14 +485,19 @@ class TrayUI:
         if getattr(self, "last_color", None) != color:
             self.tray.icon = icon_image(color)
             self.last_color = color
-        self.pause_button.configure(text="恢复挂机" if snap["paused"] else "暂停挂机")
-        hold = snap.get("safety", {})
-        cooling = bool(hold.get("blocked") and hold.get("until"))
-        self.safety_button.configure(
-            text=("冷却中 · 自动恢复" if cooling else "重新扫码登录"
-                  if hold.get("kind") in ("auth", "credentials") else "解除异常暂停"),
-            state="normal" if hold.get("blocked") else "disabled",
-        )
+        pause_pending = "pause" in self.control_actions
+        self.pause_button.configure(text="正在处理…" if pause_pending else "恢复挂机" if snap["paused"] else "暂停挂机",
+                                    state="disabled" if pause_pending or self.closing else "normal")
+        self.workbench.check_button.configure(state="disabled" if self.closing or "check" in self.control_actions else "normal")
+        self.recovery_target = recovery_route(snap)
+        if self.recovery_target:
+            self.safety_button.configure(text=self.recovery_target["label"],
+                                         state="disabled" if self.closing or "safety" in self.control_actions else "normal")
+            if not self.safety_button.winfo_manager():
+                self.safety_button.pack(side="right", before=self.pause_button, padx=(self.px(6), 0))
+        else:
+            self.safety_button.configure(state="disabled")
+            self.safety_button.pack_forget()
 
     def _render_rows(self, snap):
         self.rows_cache.clear()
@@ -491,23 +575,9 @@ class TrayUI:
                 self.tree.move(iid, "", idx)
 
     def _render_footer(self, snap):
-        hold = snap.get("safety", {})
-        if hold.get("blocked"):
-            until = hold.get("until")
-            suffix = (
-                " · 自动恢复时间 " + time.strftime("%H:%M:%S", time.localtime(until))
-                if until
-                else " · 点击状态栏“解除异常暂停”按钮"
-            )
-            self.footer.set(hold["reason"] + suffix)
-            return
-        warnings = [row["name"] for row in snap["rows"] if row.get("watch_warning")]
-        connections = [row["name"] for row in snap["rows"] if row.get("connection_warning")]
-        if connections:
-            self.footer.set("⚠ 连接异常：" + "、".join(connections) + "；请选择主播，点击右侧“重连此直播间”。")
-            return
-        if warnings:
-            self.footer.set("⚠ 看播收益待核验：" + "、".join(warnings) + "；请选择主播查看详情，或点击立即检查。")
+        route = recovery_route(snap)
+        if route:
+            self.footer.set(route["message"] + f" · 点击“{route['label']}”")
             return
         next_time = (
             time.strftime("%H:%M:%S", time.localtime(snap["next_check"]))

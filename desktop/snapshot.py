@@ -150,6 +150,7 @@ def project_row(engine, member, state, now):
         "heartbeat_healthy": heartbeat_healthy,
         "connection_warning": connection_warning,
         "reconnect_allowed": reconnect_allowed,
+        "reconnect_cooldown_until": recovery.get("cooldown_until", 0),
         "reconnecting": recovering or (recovery.get("state") == "starting" and not heartbeat_healthy and active),
         "reconnect_message": ("重连成功，已收到服务端心跳。" if recovery.get("state") == "starting"
                               and heartbeat_healthy else recovery.get("message", "")),

@@ -14,6 +14,7 @@ class Dispatcher:
         self.owner = threading.get_ident()
         self.callbacks = queue.Queue()
         self.pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="desktop-io")
+        self.control_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="desktop-control")
         self.closed = False
         self.root.after(50, self.drain)
 
@@ -25,6 +26,14 @@ class Dispatcher:
         if self.closed:
             return
         future = self.pool.submit(function)
+        future.add_done_callback(self._report)
+        return future
+
+    def submit_control(self, function):
+        """Keep pause/exit/reconnect available while network jobs occupy IO workers."""
+        if self.closed:
+            return
+        future = self.control_pool.submit(function)
         future.add_done_callback(self._report)
         return future
 
@@ -54,3 +63,8 @@ class Dispatcher:
     def close(self):
         self.closed = True
         self.pool.shutdown(wait=False, cancel_futures=True)
+        self.control_pool.shutdown(wait=False, cancel_futures=True)
+
+    def wait_for_io(self):
+        """Exit waits off the Tk thread until previously submitted IO has finished."""
+        self.pool.shutdown(wait=True, cancel_futures=True)

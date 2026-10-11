@@ -275,13 +275,17 @@ class Engine:
             return {"state_error": "等待当前进程发布状态", "started": self.started_at}
         return value
 
-    def snapshot(self):
-        with self.lock:
+    def snapshot(self, *, blocking=True):
+        if not self.lock.acquire(blocking=blocking):
+            return None
+        try:
             states = {m["room"]: self._read_room_state(m["room"]) for m in self.members}
             result = project_snapshot(self, states, time.time())
             if self.publish_error:
                 result["error"] = "运行快照发布失败：" + self.publish_error
             return result
+        finally:
+            self.lock.release()
 
     def persist(self, exited=False):
         write_json(self.root / "status.json", {**self.snapshot(), "exited": exited})
