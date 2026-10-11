@@ -5,6 +5,7 @@ from desktop.dispatch import Dispatcher
 import os
 import logging
 import queue
+import subprocess
 import threading
 import time
 import tkinter as tk
@@ -162,6 +163,23 @@ class TrayUI:
 
         self.engine.dispatcher.submit(task_thread)
 
+    def on_reconnect_room(self):
+        selected = self.tree.selection()
+        row = self.rows_cache.get(selected[0], {}) if selected else {}
+        if not row.get("reconnect_allowed") or getattr(self, "reconnect_pending", False):
+            return
+        room, name = row["room"], row["name"]
+        self.reconnect_pending = True
+        self.workbench.reconnect_button.configure(state="disabled", text="正在请求重连…")
+        def reconnect():
+            try:
+                ok, message = self.engine.reconnect_room(room)
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                logging.exception("Room reconnect failed")
+                ok, message = False, f"重连未成功（{type(exc).__name__}），请稍后重试。"
+            self.commands.put(("reconnect_done", name, ok, message))
+        self.engine.dispatcher.submit(reconnect)
+
     def on_wear_medal(self):
         selected = self.tree.selection()
         if not selected or selected[0] == "_empty":
@@ -274,6 +292,10 @@ class TrayUI:
                     _, name, res = cmd
                     self.task_notice = (format_task_result(name, res), time.time() + 20)
                     self.engine.check_now()
+                elif action == "reconnect_done":
+                    _, name, ok, message = cmd
+                    self.reconnect_pending = False
+                    self.task_notice = (f"【{name}】{message}", time.time() + 20)
                 elif action == "wear_done":
                     _, name, res = cmd
                     if res == "ok":
@@ -343,11 +365,18 @@ class TrayUI:
         self.engine.dispatcher.submit(recover)
 
     def _render_overview(self, snap):
-        active = sum((row["active"] for row in snap["rows"]))
+        active = sum(row.get("heartbeat_healthy", row["active"] and not row.get("heartbeat_stale")) for row in snap["rows"])
+        stalled = sum(bool(row.get("heartbeat_stale")) for row in snap["rows"])
+        connecting = sum(bool(row["active"] and not row.get("heartbeat_healthy", False)
+                              and not row.get("heartbeat_stale")) for row in snap["rows"])
         warnings = sum(bool(row.get("watch_warning")) for row in snap["rows"])
         title = "已暂停" if snap["paused"] else f"{active} 个直播间挂机中" if active else "等待开播"
         if snap["error"]:
             title = "需要处理"
+        elif stalled:
+            title = "连接异常，请查看详情"
+        elif connecting and not snap["paused"]:
+            title = "正在建立看播连接"
         live = sum(row.get("live_status") == 1 for row in snap["rows"])
         self.summary.set(
             snap["error"]
@@ -355,6 +384,8 @@ class TrayUI:
             + ("已暂停" if snap["paused"] else f"挂机 {active}")
             + (" · 正在检查…" if snap["checking"] else "")
             + (f" · {warnings} 个看播收益待核验" if warnings else "")
+            + (f" · 连接异常 {stalled}" if stalled else "")
+            + (f" · 连接中 {connecting}" if connecting and not snap["paused"] else "")
         )
         notice, until = getattr(self, "task_notice", ("", 0))
         if time.time() < until:
@@ -371,7 +402,7 @@ class TrayUI:
         else:
             self.account_label.configure(text="🔴 尚未登录", fg="#991b1b")
             self.badge_frame.configure(bg="#fef2f2", highlightbackground="#fecaca")
-        color = "#f2ab55" if snap["error"] or warnings else "#9ca9af" if snap["paused"] else "#63d4b2"
+        color = "#f2ab55" if snap["error"] or warnings or stalled else "#9ca9af" if snap["paused"] else "#63d4b2"
         if getattr(self, "last_color", None) != color:
             self.tray.icon = icon_image(color)
             self.last_color = color
@@ -471,6 +502,10 @@ class TrayUI:
             self.footer.set(hold["reason"] + suffix)
             return
         warnings = [row["name"] for row in snap["rows"] if row.get("watch_warning")]
+        connections = [row["name"] for row in snap["rows"] if row.get("connection_warning")]
+        if connections:
+            self.footer.set("⚠ 连接异常：" + "、".join(connections) + "；请选择主播，点击右侧“重连此直播间”。")
+            return
         if warnings:
             self.footer.set("⚠ 看播收益待核验：" + "、".join(warnings) + "；请选择主播查看详情，或点击立即检查。")
             return
@@ -493,15 +528,18 @@ class TrayUI:
             self.watch_notice_day = day
             self.watch_notices = set()
         for row in snap["rows"]:
-            if not row.get("watch_warning"):
+            connection = row.get("connection_warning")
+            warning = connection or row.get("watch_warning")
+            if not warning:
                 continue
             watch = row.get("watch_progress", {})
             key = (row["room"], row.get("session_id") or row.get("started"),
-                   watch.get("status"), watch.get("warning_since"))
+                   ("connection", row.get("last_heartbeat")) if connection else
+                   (watch.get("status"), watch.get("warning_since")))
             if key in self.watch_notices:
                 continue
             try:
-                self.tray.notify(f"【{row['name']}】{row['watch_warning']}", title="LiveSupport · 看播收益提醒")
+                self.tray.notify(f"【{row['name']}】{warning}", title="LiveSupport · 连接提醒" if connection else "LiveSupport · 看播收益提醒")
             except Exception:
                 logging.exception("Watch reward notification failed")
             self.watch_notices.add(key)

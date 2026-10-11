@@ -93,8 +93,11 @@ class RoomStateRecorder:
         self.save()
 
 
-def watch(root, room, skip_actions=False):
+def watch(root, room, skip_actions=False, *, watch_only=False):
     config, members = load_config(root)
+    # The legacy skip_actions flag remains ignored for command compatibility.
+    if watch_only:
+        config = {**config, "auto_revive": False, "auto_danmaku_intimacy": False, "auto_like": False}
     member = next((m for m in members if m["room"] == room))
     mutex = Mutex(instance_name(root) + f"-room-{room}")
     if not mutex.acquired:

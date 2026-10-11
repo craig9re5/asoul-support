@@ -117,6 +117,38 @@ def main():
                           "status": "tracking", "warning": ""})
                 ui.refresh()
                 assert not ui.workbench.detail_warning.winfo_manager()
+                # An expired heartbeat provides a usable repair action and accurate counts.
+                recorder.state.update(last_heartbeat=time.time() - 900, started=time.time() - 1200)
+                recorder.save()
+                ui.tray.notify.reset_mock()
+                ui.refresh()
+                ui.refresh()
+                assert "挂机 0" in ui.summary.get() and "连接异常 1" in ui.summary.get()
+                assert "重连此直播间" in ui.footer.get()
+                assert ui.workbench.reconnect_button.cget("state") == "normal"
+                assert "长时间没有成功心跳" in ui.workbench.detail_warning.cget("text")
+                detail_children = ui.workbench.detail_frame.pack_slaves()
+                assert detail_children.index(ui.workbench.detail_phase) + 1 == detail_children.index(ui.workbench.detail_warning)
+                assert ui.tree.items["2"]["phase"].cget("fg") == "#a65c00"
+                ui.tray.notify.assert_called_once()
+                with patch.object(engine, "reconnect_room", return_value=(False, "模拟网络失败，请重试。")) as reconnect, \
+                     patch.object(engine.dispatcher, "submit", side_effect=lambda callback: callback()):
+                    ui.workbench.reconnect_button.invoke()
+                    assert ui.reconnect_pending
+                    ui.on_reconnect_room()
+                    reconnect.assert_called_once_with(2)
+                    ui.refresh()
+                    assert not ui.reconnect_pending and "模拟网络失败" in ui.summary.get()
+                ui.task_notice = ("", 0)
+                engine.manual_reconnects[2] = {"state": "checking", "cooldown_until": time.time() + 60}
+                ui.refresh()
+                assert ui.workbench.reconnect_button.cget("state") == "disabled"
+                assert ui.workbench.reconnect_button.cget("text") == "重连中…"
+                engine.manual_reconnects.clear()
+                engine.paused = True
+                ui.refresh()
+                assert ui.workbench.reconnect_button.cget("state") == "disabled"
+                engine.paused = False
                 engine.workers.clear()
                 engine.safety = {"blocked": True, "kind": "review", "reason": "测试账号保护暂停"}
                 ui.refresh()

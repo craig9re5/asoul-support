@@ -33,6 +33,7 @@ class Engine:
         self.workers = {}
         self.worker_health = {}
         self.worker_retries = {}
+        self.manual_reconnects = {}
         self.started_at = time.time()
         self.last_tick = 0
         self.last_status_publish = 0
@@ -97,12 +98,14 @@ class Engine:
             changed = config != self.config or members != self.members or credentials_changed
             if policy_changed or credentials_changed:
                 self.stop_children("settings_changed")
+                self.manual_reconnects.clear()
             if credentials_changed:
                 self.account = ""
                 self.account_checked_at = 0
                 self.medals, self.tasks, self.statuses = ({}, {}, {})
                 self.status_times, self.status_errors, self.task_errors = ({}, {}, {})
             keep = {m["room"] for m in members}
+            self.manual_reconnects = {room: request for room, request in self.manual_reconnects.items() if room in keep}
             self.worker_retries = {room: retry for room, retry in self.worker_retries.items() if room in keep}
             for room in list(self.workers):
                 if room not in keep:
@@ -201,6 +204,41 @@ class Engine:
             self.next_check = 0
             self.force_probe = True
 
+    def reconnect_room(self, room):
+        """Replace only the selected worker, after a fresh live-status probe."""
+        with self.lock:
+            if not any(member["room"] == room for member in self.members):
+                return False, "该直播间已不在关注列表中。"
+            self.safety = self.application.safety_status()
+            if self.safety.get("blocked"):
+                return False, "账号保护暂停中，请先处理账号异常。"
+            if self.paused:
+                return False, "挂机已暂停，请先点击恢复挂机。"
+            previous = self.manual_reconnects.get(room, {})
+            now = time.time()
+            if previous.get("cooldown_until", 0) > now:
+                return False, "重连请求已提交，请稍后再试。"
+            proc = self.workers.get(room)
+            if proc:
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=5)
+                self._record_interruption(room, "manual_reconnect", expected_pid=proc.pid)
+                self.workers.pop(room, None)
+                self.worker_health.pop(room, None)
+            self.worker_retries.pop(room, None)
+            self.manual_reconnects[room] = {"state": "checking", "requested_at": now,
+                                           "cooldown_until": now + 60, "skip_actions": True}
+            self.next_check = 0
+            self.force_probe = True
+            append_event(self.root / "logs/activity.jsonl", {"type": "manual_reconnect", "room": room})
+            self.persist()
+            return True, "已请求重连，正在确认直播状态；只恢复看播连接。"
+
     def resume_safety(self, confirmed=False):
         with self.lock:
             ok, message = self.application.resume_safety(confirmed)
@@ -292,6 +330,9 @@ class Engine:
             record = self.worker_health.setdefault(room, {
                 "pid": proc.pid, "started": clock, "progress": clock,
             })
+            if "signature" in record:
+                record.setdefault("beat_signature", record["signature"][0])
+            record.setdefault("beat_progress", record.get("progress", record["started"]))
             if not check_progress(state, record, clock):
                 if state.get("pid") == proc.pid and number(state.get("beats")) >= 5:
                     self.worker_retries.pop(room, None)
@@ -354,7 +395,13 @@ class Engine:
         ):
             self.force_probe = False
             self.probe_path = self.root / "state" / f"probe-{uuid.uuid4().hex}.json"
-            self.probe = self.spawn("--probe", str(self.probe_path))
+            try:
+                self.probe = self.spawn("--probe", str(self.probe_path))
+            except OSError:
+                for request in self.manual_reconnects.values():
+                    if request.get("state") == "checking":
+                        request.update(state="failed", message="无法启动直播检查，请检查程序安装后重试。")
+                raise
             self.probe_started = now
             self.next_check = now + self.config["check_minutes"] * 60
 
@@ -367,6 +414,9 @@ class Engine:
     def _apply_probe(self, result, now):
         self.error = result.get("error") or result.get("warning", "")
         if "statuses" not in result:
+            for request in self.manual_reconnects.values():
+                if request["state"] == "checking":
+                    request.update(state="failed", message="重连检查失败，请检查网络后再试。")
             for retry in self.worker_retries.values():
                 retry["until"] = max(retry["until"], time.monotonic() + 300)
             self.error = self.error or "检查进程未返回结果，请查看日志。"
@@ -397,7 +447,16 @@ class Engine:
         for member in self.members:
             key = str(member["room"])
             status = received.get(key)
+            request = self.manual_reconnects.get(member["room"], {})
+            manual = request.get("state") == "checking"
+            if manual and observed < request["requested_at"]:
+                self.next_check = 0
+                continue
+            if manual and (not status or status.get("live_status") not in (0, 1, 2)):
+                request.update(state="failed", message="直播状态无法确认，请检查网络后重试。")
             if status and status.get("live_status") in (0, 2):
+                if request:
+                    request.update(state="offline", message="房间已下播，无需重连。", skip_actions=False)
                 self.worker_retries.pop(member["room"], None)
             elif not status or status.get("live_status") not in (0, 1, 2):
                 retry = self.worker_retries.get(member["room"])
@@ -422,8 +481,20 @@ class Engine:
                 and time.monotonic() >= self.worker_retries.get(member["room"], {}).get("until", 0)
             ):
                 args = ["--worker", key]
-                proc = self.spawn(*args)
+                skip_actions = request.get("skip_actions", False)
+                if skip_actions:
+                    args.append("--watch-only")
+                try:
+                    proc = self.spawn(*args)
+                except OSError:
+                    if request:
+                        request.update(state="failed", message="无法启动看播连接，请检查程序安装后重试。")
+                    self.worker_retries[member["room"]] = {"attempt": 1, "until": time.monotonic() + 60}
+                    logging.exception("Cannot start room worker room=%s", member["room"])
+                    continue
                 self.workers[member["room"]] = proc
                 self.worker_health[member["room"]] = {
                     "pid": proc.pid, "started": time.monotonic(), "progress": time.monotonic(),
                 }
+                if skip_actions:
+                    request.update(state="starting", message="已启动新连接，等待成功心跳。")

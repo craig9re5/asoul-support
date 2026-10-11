@@ -141,6 +141,97 @@ class StabilityTests(unittest.TestCase):
             self.engine._apply_probe({"statuses": {"1": {"live_status": 1}}}, 100)
         spawn.assert_not_called()
 
+    def test_task_churn_cannot_extend_the_heartbeat_deadline(self):
+        record = {"pid": 99, "started": 0, "progress": 0}
+        state = {"pid": 99, "last_heartbeat": 100, "phase": "挂机中"}
+        self.assertFalse(check_progress(state, record, 0))
+        for stamp in (300, 900, 1700):
+            state.update(phase="执行任务中", task_started=stamp)
+            self.assertFalse(check_progress(state, record, stamp))
+        self.assertTrue(check_progress(state, record, TASK_TIMEOUT + 1))
+        state.update(phase="挂机中", task_started=None)
+        self.assertTrue(check_progress(state, record, TASK_TIMEOUT + 2))
+
+    def test_manual_reconnect_stops_only_selected_room_and_waits_for_fresh_probe(self):
+        selected, other = Mock(pid=99), Mock(pid=100)
+        selected.poll.return_value = other.poll.return_value = None
+        self.engine.workers = {1: selected, 2: other}
+        self.engine.worker_health[1] = {"pid": 99}
+        self.engine.worker_retries[1] = {"attempt": 3, "until": 10000}
+        with patch("desktop.engine.time.time", return_value=100):
+            ok, _ = self.engine.reconnect_room(1)
+        self.assertTrue(ok)
+        selected.terminate.assert_called_once()
+        other.terminate.assert_not_called()
+        self.assertNotIn(1, self.engine.workers)
+        self.assertEqual(self.engine.next_check, 0)
+        with patch.object(self.engine, "spawn", return_value=Mock(pid=101)) as spawn:
+            self.engine._apply_probe({"statuses": {"1": {"live_status": 1}}, "observed": 99}, 101)
+            spawn.assert_not_called()
+            self.engine._apply_probe({"statuses": {"1": {"live_status": 1}}, "observed": 102}, 103)
+        spawn.assert_called_once_with("--worker", "1", "--watch-only")
+        self.assertTrue(self.engine.manual_reconnects[1]["skip_actions"])
+
+    def test_manual_reconnect_respects_pause_protection_and_duplicate_cooldown(self):
+        self.engine.paused = True
+        self.assertFalse(self.engine.reconnect_room(1)[0])
+        self.engine.paused = False
+        with patch.object(self.engine.application, "safety_status", return_value={"blocked": True}):
+            self.assertFalse(self.engine.reconnect_room(1)[0])
+        with patch("desktop.engine.time.time", return_value=100):
+            self.assertTrue(self.engine.reconnect_room(1)[0])
+            self.assertFalse(self.engine.reconnect_room(1)[0])
+        self.assertFalse(self.engine.reconnect_room(999)[0])
+
+    def test_manual_reconnect_never_starts_for_offline_or_unknown_status(self):
+        for result in ({"statuses": {"1": {"live_status": 0}}}, {"statuses": {}}, {"error": "network"}):
+            with self.subTest(result=result):
+                self.engine.manual_reconnects.clear()
+                with patch("desktop.engine.time.time", return_value=100):
+                    self.assertTrue(self.engine.reconnect_room(1)[0])
+                with patch.object(self.engine, "spawn") as spawn:
+                    self.engine._apply_probe(result, 101)
+                spawn.assert_not_called()
+                self.assertIn(self.engine.manual_reconnects[1]["state"], ("offline", "failed"))
+
+    def test_manual_reconnect_worker_skips_reactions_without_changing_saved_policy(self):
+        from desktop.worker import watch
+        from desktop.storage import load_config
+        with patch("desktop.worker.Mutex") as mutex, patch("desktop.worker.AppContext") as app:
+            mutex.return_value.acquired = True
+            app.return_value.run_watch.return_value = 0
+            watch(self.root, 1, watch_only=True)
+            policy = app.return_value.run_watch.call_args.args[1]
+        self.assertFalse(any(policy.get(k) for k in ("auto_revive", "auto_danmaku_intimacy", "auto_like")))
+        self.assertTrue(load_config(self.root)[0]["auto_revive"])
+
+    def test_failed_worker_spawn_releases_pending_reconnect(self):
+        with patch("desktop.engine.time.time", return_value=100):
+            self.assertTrue(self.engine.reconnect_room(1)[0])
+        with patch.object(self.engine, "spawn", side_effect=OSError("synthetic spawn failure")):
+            self.engine._apply_probe({"statuses": {"1": {"live_status": 1}}}, 101)
+        self.assertEqual(self.engine.manual_reconnects[1]["state"], "failed")
+        self.assertNotIn(1, self.engine.workers)
+        self.assertGreater(self.engine.worker_retries[1]["until"], time.monotonic())
+
+    def test_failed_probe_spawn_releases_pending_reconnect(self):
+        self.engine.next_check = 0
+        self.engine.manual_reconnects[1] = {"state": "checking", "requested_at": 0, "skip_actions": True}
+        with patch.object(self.engine, "spawn", side_effect=OSError("synthetic spawn failure")):
+            self.engine.cycle()
+        self.assertEqual(self.engine.manual_reconnects[1]["state"], "failed")
+
+    def test_stale_connection_has_reconnect_action_and_is_not_healthy(self):
+        self.engine.workers[1] = Mock()
+        self.engine.workers[1].poll.return_value = None
+        self.engine.statuses["1"] = {"live_status": 1}
+        self.engine.status_times["1"] = time.time()
+        write_json(self.root / "state/1.json", {"started": time.time()-1000, "last_heartbeat": time.time()-900})
+        row = self.engine.snapshot()["rows"][0]
+        self.assertTrue(row["reconnect_allowed"])
+        self.assertTrue(row["connection_warning"])
+        self.assertFalse(row["heartbeat_healthy"])
+
     def test_refresh_survives_snapshot_exception(self):
         ui = Mock(closed=False)
         ui.engine.snapshot.side_effect = ValueError("synthetic error")

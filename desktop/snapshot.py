@@ -111,6 +111,22 @@ def project_row(engine, member, state, now):
     if safety.get("blocked"):
         phase = "账号保护暂停"
         task_error = safety.get("reason", "需要处理账号异常")
+    recovery = getattr(engine, "manual_reconnects", {}).get(room, {})
+    recovering = recovery.get("state") == "checking"
+    if recovering and not safety.get("blocked") and not engine.paused:
+        phase = "重连中，正在确认直播"
+    heartbeat_healthy = bool(active and state.get("last_heartbeat") and not heartbeat_stale
+                             and not safety.get("blocked") and not engine.paused)
+    connection_warning = ""
+    if heartbeat_stale and not engine.paused and not safety.get("blocked"):
+        connection_warning = "长时间没有成功心跳，看播收益可能中断。可点击下方“重连此直播间”恢复连接。"
+        if state.get("task_started"):
+            connection_warning += " 当前任务仍在执行，重连会停止该任务并只恢复看播。"
+    elif recovery.get("state") == "failed" and not engine.paused and not safety.get("blocked"):
+        connection_warning = recovery.get("message", "重连失败，请稍后再试。")
+    reconnect_allowed = bool((active or live_status == 1 or connection_warning)
+                             and not engine.paused and not safety.get("blocked") and not recovering
+                             and now >= recovery.get("cooldown_until", 0))
     watch, watch_warning, task_entry, tasks_stale = watch_observation(
         state, task_entry, active, tasks_stale, now
     )
@@ -131,6 +147,12 @@ def project_row(engine, member, state, now):
         "status_error": query_error,
         "status_updated": observed,
         "heartbeat_stale": heartbeat_stale,
+        "heartbeat_healthy": heartbeat_healthy,
+        "connection_warning": connection_warning,
+        "reconnect_allowed": reconnect_allowed,
+        "reconnecting": recovering or (recovery.get("state") == "starting" and not heartbeat_healthy and active),
+        "reconnect_message": ("重连成功，已收到服务端心跳。" if recovery.get("state") == "starting"
+                              and heartbeat_healthy else recovery.get("message", "")),
         "tasks_stale": tasks_stale,
         "session_id": state.get("session_id"),
         "task_error": task_error,

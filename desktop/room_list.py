@@ -180,7 +180,7 @@ class RoomList(tk.Frame):
         item["metadata_text"] = {"phase": values[4], "medal": values[2].split("\n")[0],
                                  "gain": gain_label(row) if row.get("medal_name") else ""}
         self._fit_headline(item, self.canvas.winfo_width())
-        item["phase"].configure(fg="#a65c00" if row.get("watch_warning") else MUTED)
+        item["phase"].configure(fg="#a65c00" if row.get("watch_warning") or row.get("connection_warning") else MUTED)
         if not item.get("photo"):
             item["avatar"].configure(text=row.get("name", "?")[:1])
         self._paint(iid)

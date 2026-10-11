@@ -22,12 +22,18 @@ def check_progress(state, record, now):
     beat = number(state.get("last_heartbeat"))
     task_start = number(state.get("task_started")) if state.get("phase") == "执行任务中" else 0
     signature = (beat, task_start)
+    if beat != record.get("beat_signature"):
+        record["beat_signature"] = beat
+        record["beat_progress"] = now
     if signature != record.get("signature"):
         record["signature"] = signature
         record["progress"] = now
     record["had_beat"] = record.get("had_beat", False) or beat > 0
-    timeout = TASK_TIMEOUT if task_start else heartbeat_timeout(state) if record["had_beat"] else CONNECT_TIMEOUT
-    return now - record.get("progress", record["started"]) > timeout
+    # Task churn must never reset the deadline for an actual successful beat.
+    if not record["had_beat"]:
+        return now - record["started"] > CONNECT_TIMEOUT
+    timeout = TASK_TIMEOUT if task_start else heartbeat_timeout(state)
+    return now - record.get("beat_progress", record["started"]) > timeout
 
 
 def recovery_delay(attempt):

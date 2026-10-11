@@ -18,6 +18,7 @@ def main():
     parser.add_argument("--worker", type=int)
     parser.add_argument("--probe")
     parser.add_argument("--skip-actions", action="store_true")
+    parser.add_argument("--watch-only", action="store_true")
     parser.add_argument("--command", choices=["pause", "resume", "check", "show", "exit"])
     parser.add_argument("--show", action="store_true")
     parser.add_argument("--login", action="store_true", help="打开 B 站扫码登录")
@@ -87,7 +88,7 @@ def main():
     if args.worker:
         from desktop.worker import watch
 
-        return watch(root, args.worker, args.skip_actions)
+        return watch(root, args.worker, args.skip_actions, watch_only=args.watch_only)
     if args.diagnostic:
         from desktop.ui import icon_image
         from desktop.storage import write_json, load_config

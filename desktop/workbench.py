@@ -96,8 +96,13 @@ class Workbench:
         self.detail_warning = label(self.detail_frame, "", size=9, color="#a65c00")
         self.detail_warning.configure(wraplength=p(275))
         action = self.detail_actions
-        ModernButton(action, text="打开直播间", command=ui.on_open_room, px=p).pack(side="left")
-        self.redo_button = ModernButton(action, text="补齐任务", command=lambda: ui.on_redo_task("all"), px=p)
+        self.reconnect_button = ModernButton(action, text="重连此直播间", command=ui.on_reconnect_room,
+                                            primary=True, px=p, state="disabled")
+        self.reconnect_button.pack(fill="x", pady=(0, p(8)))
+        action_row = tk.Frame(action, bg="white")
+        action_row.pack(fill="x")
+        ModernButton(action_row, text="打开直播间", command=ui.on_open_room, px=p).pack(side="left")
+        self.redo_button = ModernButton(action_row, text="补齐任务", command=lambda: ui.on_redo_task("all"), px=p)
         self.redo_button.pack(side="left", padx=(p(8),0))
         self.settings_host = tk.Frame(self.body, bg=BG)
 
@@ -238,10 +243,18 @@ class Workbench:
         import time
         last = time.strftime("%H:%M:%S", time.localtime(heartbeat)) if heartbeat else "暂无成功心跳"
         self.detail_heartbeat.configure(text=f"最近心跳：{last}" + ("\n"+row["task_error"] if row.get("task_error") else ""))
-        if row.get("watch_warning"):
-            self.detail_warning.configure(text="⚠ " + row["watch_warning"])
-            self.detail_warning.pack(fill="x", pady=(0, self.ui.px(12)))
+        warning = "\n".join(message for message in (row.get("connection_warning"), row.get("watch_warning")) if message)
+        if warning:
+            self.detail_warning.configure(text="⚠ " + warning)
+            self.detail_warning.pack(after=self.detail_phase, fill="x", pady=(0, self.ui.px(12)))
         else:
             self.detail_warning.pack_forget()
         enabled = row.get("live_status") == 1 and not self.snap.get("paused") and not self.snap.get("safety",{}).get("blocked")
         self.redo_button.configure(state="normal" if enabled else "disabled")
+        pending = getattr(self.ui, "reconnect_pending", False)
+        self.reconnect_button.configure(state="normal" if row.get("reconnect_allowed") and not pending else "disabled",
+                                        text="重连中…" if row.get("reconnecting") or pending else "重连此直播间")
+        message = row.get("reconnect_message", "")
+        if message and not warning:
+            self.detail_warning.configure(text=message)
+            self.detail_warning.pack(after=self.detail_phase, fill="x", pady=(0, self.ui.px(12)))
