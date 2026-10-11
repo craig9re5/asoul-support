@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import font as tkfont
 from .avatars import round_avatar
 from .presentation import gain_label
-from .widgets import FONT_FAMILY
+from .widgets import FONT_FAMILY, SlimScrollbar
 
 BACKGROUND = "#ffffff"
 SELECTED = "#edf3f1"
@@ -19,9 +19,7 @@ class RoomList(tk.Frame):
         self.ui, self.items, self.order = ui, {}, []
         self.selected, self.focused = "", ""
         self.canvas = tk.Canvas(self, bg=BACKGROUND, highlightthickness=0)
-        scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
+        self.scrollbar = SlimScrollbar(self, self.canvas, ui.px)
         self.canvas.pack(side="left", fill="both", expand=True)
         self.content = tk.Frame(self.canvas, bg=BACKGROUND)
         self.window = self.canvas.create_window(0, 0, window=self.content, anchor="nw")

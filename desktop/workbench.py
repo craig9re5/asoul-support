@@ -1,13 +1,14 @@
 """Workbench layout. All user actions keep the existing application/engine adapters."""
 
 import os
+import re
 import time
 import tkinter as tk
 from .avatars import AvatarLoader
 from .room_list import RoomList
 from .presentation import phase_label, gain_label
 from .interaction import action_reason
-from .widgets import ModernButton, FONT_FAMILY, icon_image, navigation_icon
+from .widgets import ModernButton, SlimScrollbar, FONT_FAMILY, icon_image, navigation_icon
 from .dialogs import SettingsPanel
 
 BG = "#f5f6f5"
@@ -47,69 +48,114 @@ class Workbench:
         self._build_footer()
         self.area = tk.Frame(self.body, bg=BG)
         self.area.pack(fill="both", expand=True)
-        self.list_frame = tk.Frame(self.area, bg="white", highlightbackground="#e2e8e6", highlightthickness=1)
+        self.list_frame = tk.Frame(self.area, bg="white", highlightbackground="#e2e8e6",
+                                   highlightcolor="#e2e8e6", highlightthickness=1, bd=0)
         self.list_frame.pack(side="left", fill="both", expand=True, padx=(0,p(12)))
         label(self.list_frame, "关注的直播间", size=10, bold=True).pack(anchor="w", padx=p(12), pady=p(8))
         ui.tree = RoomList(self.list_frame, ui)
         ui.tree.pack(fill="both", expand=True)
         ui.tree.bind("<<TreeviewSelect>>", lambda _: self.render_detail())
-        self.detail_outer = tk.Frame(self.area, bg="white", width=p(318),
-                                    highlightbackground="#e2e8e6", highlightthickness=1)
+        self._build_detail()
+        self.settings_host = tk.Frame(self.body, bg=BG)
+
+    def _build_detail(self):
+        ui, p = self.ui, self.ui.px
+        self.detail_outer = tk.Frame(self.area, bg="white", width=p(340), bd=0,
+                                    highlightbackground="#e2e8e6", highlightcolor="#e2e8e6", highlightthickness=1)
         self.detail_outer.pack(side="left", fill="y")
         self.detail_outer.pack_propagate(False)
-        self.detail_actions = tk.Frame(self.detail_outer, bg="white", padx=p(14), pady=p(12))
+        self.detail_actions = tk.Frame(self.detail_outer, bg="white", padx=p(16), pady=p(12))
         self.detail_actions.pack(side="bottom", fill="x")
+        tk.Frame(self.detail_outer, bg="#edf1ef", height=1).pack(side="bottom", fill="x")
         detail_scroll_area = tk.Frame(self.detail_outer, bg="white")
         detail_scroll_area.pack(fill="both", expand=True)
         self.detail_canvas = tk.Canvas(detail_scroll_area, bg="white", highlightthickness=0)
-        detail_scroll = tk.Scrollbar(detail_scroll_area, command=self.detail_canvas.yview)
-        detail_scroll.pack(side="right", fill="y")
-        self.detail_canvas.configure(yscrollcommand=detail_scroll.set)
+        self.detail_scroll = SlimScrollbar(detail_scroll_area, self.detail_canvas, p)
         self.detail_canvas.pack(fill="both", expand=True)
-        self.detail_frame = tk.Frame(self.detail_canvas, bg="white", padx=p(16), pady=p(18))
+        self.detail_frame = tk.Frame(self.detail_canvas, bg="white", padx=p(16), pady=p(14))
         detail_window = self.detail_canvas.create_window(0, 0, window=self.detail_frame, anchor="nw")
-        self.detail_canvas.bind("<Configure>", lambda e: self.detail_canvas.itemconfigure(detail_window, width=e.width))
+        def resize(event):
+            self.detail_canvas.itemconfigure(detail_window, width=event.width)
+            for widget in (self.detail_title, self.detail_live_title, self.detail_warning,
+                           self.detail_heartbeat, self.action_hint):
+                widget.configure(wraplength=max(p(80), event.width - p(54)))
+            self.detail_warning.configure(wraplength=max(p(80), event.width - p(76)))
+            self.detail_phase.configure(wraplength=max(p(80), event.width - p(140)))
+        self.detail_canvas.bind("<Configure>", resize)
         self.detail_frame.bind("<Configure>", lambda _: self.detail_canvas.configure(scrollregion=self.detail_canvas.bbox("all")))
+        label(self.detail_frame, "直播间详情", size=8, color=MUTED).pack(fill="x", pady=(0, p(4)))
         self.detail_title = label(self.detail_frame, "选择主播查看详情", size=12, bold=True)
         self.detail_title.pack(fill="x")
-        self.detail_phase = label(self.detail_frame, "", size=9, color=MUTED)
-        self.detail_phase.pack(fill="x", pady=(p(8),p(18)))
         self.detail_live_title = label(self.detail_frame, "", size=9, color=MUTED)
-        self.detail_live_title.configure(wraplength=p(265))
-        self.detail_live_title.pack(fill="x", pady=(0,p(12)))
-        self.detail_medal = label(self.detail_frame, "粉丝牌信息待更新", size=11)
-        self.detail_medal.pack(fill="x")
-        self.detail_gain = label(self.detail_frame, "今日亲密度：待更新", size=10, color=ACCENT)
-        self.detail_gain.pack(fill="x", pady=(p(6),p(7)))
-        self.detail_exp = label(self.detail_frame, "", size=9, color=MUTED)
-        self.detail_exp.pack(fill="x", pady=(0,p(18)))
+        self.detail_live_title.pack(fill="x", pady=(p(4),p(12)))
+        self.connection_card = tk.Frame(self.detail_frame, bg="#f0f6f3", padx=p(10), pady=p(10))
+        self.connection_card.pack(fill="x", pady=(0, p(12)))
+        status_row = tk.Frame(self.connection_card, bg="#f0f6f3")
+        status_row.pack(fill="x")
+        self.reconnect_button = ModernButton(status_row, text="重连", command=ui.on_reconnect_room,
+                                            primary=True, px=p, state="disabled")
+        self.reconnect_button.pack(side="right", padx=(p(8), 0))
+        self.detail_phase = label(status_row, "", size=9, color=ACCENT, bg="#f0f6f3", bold=True)
+        self.detail_phase.configure(width=1)
+        self.detail_phase.pack(side="left", fill="x", expand=True)
+        self.detail_heartbeat = label(self.connection_card, "", size=8, color=MUTED, bg="#f0f6f3")
+        self.detail_heartbeat.pack(fill="x", pady=(p(5), 0))
+        self.detail_warning = label(self.connection_card, "", size=9, color="#875818", bg="#fff3df")
+        self.detail_warning.configure(padx=p(8), pady=p(7))
+        summary = tk.Frame(self.detail_frame, bg="#f7f9f8", padx=p(12), pady=p(12))
+        summary.pack(fill="x", pady=(0, p(16)))
+        self.detail_gain = label(summary, "今日亲密度：待更新", size=14, color=ACCENT, bg="#f7f9f8", bold=True)
+        self.detail_gain.pack(fill="x")
+        self.detail_medal = label(summary, "粉丝牌信息待更新", size=9, bg="#f7f9f8")
+        self.detail_medal.pack(fill="x", pady=(p(6), p(4)))
+        self.detail_exp = label(summary, "", size=8, color=MUTED, bg="#f7f9f8")
+        self.detail_exp.pack(fill="x")
+        self.experience_bar = tk.Canvas(summary, bg="#e4ece8", height=p(4), bd=0, highlightthickness=0)
+        self.experience_bar.pack(fill="x", pady=(p(8), 0))
+        self.experience_fraction = 0
+        self.experience_bar.bind("<Configure>", lambda _: self._draw_experience())
+        task_heading = tk.Frame(self.detail_frame, bg="white")
+        task_heading.pack(fill="x", pady=(0, p(3)))
+        label(task_heading, "今日任务", size=10, bold=True).pack(side="left")
+        label(task_heading, "服务端进度", size=8, color=MUTED).pack(side="right")
         self.task_labels = []
         for title in ("弹幕", "点赞", "看播", "灯牌"):
-            row = tk.Frame(self.detail_frame, bg="white", pady=p(10))
+            row = tk.Frame(self.detail_frame, bg="white", pady=p(8))
             row.pack(fill="x")
             label(row, title, size=10).pack(side="left")
             value = label(row, "待更新", size=9, color=MUTED)
             value.pack(side="right")
             self.task_labels.append((title, value))
-            tk.Frame(self.detail_frame, bg="#e2e8e6", height=1).pack(fill="x")
-        self.detail_heartbeat = label(self.detail_frame, "", size=9, color=MUTED)
-        self.detail_heartbeat.pack(fill="x", pady=(p(18),p(12)))
-        self.detail_heartbeat.configure(wraplength=p(275))
-        self.detail_warning = label(self.detail_frame, "", size=9, color="#a65c00")
-        self.detail_warning.configure(wraplength=p(275))
+            tk.Frame(self.detail_frame, bg="#edf1ef", height=1).pack(fill="x")
+        note = label(self.detail_frame, "任务完成后的亲密度以服务端实际结算为准。", size=8, color=MUTED)
+        note.configure(wraplength=p(285))
+        note.pack(fill="x", pady=(p(10), 0))
         action = self.detail_actions
-        self.reconnect_button = ModernButton(action, text="重连此直播间", command=ui.on_reconnect_room,
-                                            primary=True, px=p, state="disabled")
-        self.reconnect_button.pack(fill="x", pady=(0, p(8)))
         action_row = tk.Frame(action, bg="white")
         action_row.pack(fill="x")
-        ModernButton(action_row, text="打开直播间", command=ui.on_open_room, px=p).pack(side="left")
+        self.open_button = ModernButton(action_row, text="打开直播间", command=ui.on_open_room, px=p)
+        self.open_button.pack(side="left")
         self.redo_button = ModernButton(action_row, text="补齐任务", command=lambda: ui.on_redo_task("all"), px=p)
         self.redo_button.pack(side="left", padx=(p(8),0))
         self.action_hint = label(action, "请选择主播后操作", size=8, color=MUTED)
-        self.action_hint.configure(wraplength=p(275))
+        self.action_hint.configure(wraplength=p(285))
         self.action_hint.pack(fill="x", pady=(p(6), 0))
-        self.settings_host = tk.Frame(self.body, bg=BG)
+        def bind_wheel(widget):
+            widget.bind("<MouseWheel>", self._detail_wheel)
+            for child in widget.winfo_children():
+                bind_wheel(child)
+        bind_wheel(self.detail_outer)
+
+    def _detail_wheel(self, event):
+        if self.detail_scroll.last - self.detail_scroll.first < 1:
+            self.detail_canvas.yview_scroll(-int(event.delta / 120), "units")
+        return "break"
+
+    def _draw_experience(self):
+        self.experience_bar.delete("all")
+        if self.experience_fraction:
+            self.experience_bar.create_rectangle(0, 0, self.experience_bar.winfo_width() * self.experience_fraction,
+                                                 self.experience_bar.winfo_height(), fill="#6aae96", outline="")
 
     def _build_sidebar(self, shell):
         from PIL import ImageTk
@@ -239,16 +285,23 @@ class Workbench:
                                        or any(notice_key[1:])):
             self.detail_canvas.yview_moveto(0)
         self.detail_notice_key = notice_key
-        self.detail_title.configure(text=(row.get("name", "选择主播") + " · 今日任务"))
-        self.detail_phase.configure(text=phase_label(row))
+        self.detail_title.configure(text=row.get("name", "选择主播查看详情"))
+        self.detail_phase.configure(text=phase_label(row),
+                                    fg="#875818" if row.get("connection_warning") or row.get("watch_warning") else ACCENT)
         self.detail_live_title.configure(text=row.get("title", ""))
         self.detail_medal.configure(text=f"{row['medal_name']} Lv.{row.get('medal_level',0)}" if row.get("medal_name") else "暂无粉丝牌")
         self.detail_gain.configure(text=gain_label(row) if row.get("medal_name") else "")
         self.detail_exp.configure(text=f"等级经验 {row.get('intimacy',0)} / {row.get('next_intimacy',0)}" if not row.get("tasks_stale", True) else "经验数据待更新")
+        target = row.get("next_intimacy") or 0
+        self.experience_fraction = min(1, max(0, (row.get("intimacy") or 0) / target)) if target > 0 and not row.get("tasks_stale", True) else 0
+        self._draw_experience()
         for keyword, widget in self.task_labels:
             words = ("观看", "看播") if keyword == "看播" else (keyword,)
             task = next((t for t in row.get("tasks", []) if any(word in t.get("title", "") for word in words)), None)
             value = "待更新" if not task else "已完成" if task.get("is_done") else task.get("sub_title", "未完成")
+            progress = re.search(r"(\d+)\s*/\s*(\d+)", value)
+            if progress:
+                value = f"{progress[1]} / {progress[2]}"
             widget.configure(text=value, fg=ACCENT if task and task.get("is_done") else MUTED)
         heartbeat = row.get("last_heartbeat")
         import time
@@ -263,8 +316,8 @@ class Workbench:
         if operation_message:
             warning = "\n".join(message for message in (warning, operation_message) if message)
         if warning:
-            self.detail_warning.configure(text="⚠ " + warning)
-            self.detail_warning.pack(after=self.detail_phase, fill="x", pady=(0, self.ui.px(12)))
+            self.detail_warning.configure(text=warning)
+            self.detail_warning.pack(fill="x", pady=(self.ui.px(8), 0))
         else:
             self.detail_warning.pack_forget()
         redo_reason = action_reason(self.snap, row, "redo", operation.get("pending", False))
@@ -272,14 +325,20 @@ class Workbench:
         pending = operation.get("pending", False) and operation.get("kind") == "reconnect"
         reconnect_reason = action_reason(self.snap, row, "reconnect", operation.get("pending", False) or pending)
         self.reconnect_button.configure(state="disabled" if reconnect_reason else "normal",
-                                        text="重连中…" if row.get("reconnecting") or pending else "重连此直播间")
+                                        text="重连中…" if row.get("reconnecting") or pending else "重连")
+        self.open_button.configure(state="disabled" if action_reason(self.snap, row, "open") else "normal")
         reasons = list(dict.fromkeys(reason for reason in (reconnect_reason, redo_reason) if reason))
-        self.action_hint.configure(text="\n".join(reasons))
+        hint = "\n".join(reasons)
+        self.action_hint.configure(text=hint)
+        if hint:
+            self.action_hint.pack(fill="x", pady=(self.ui.px(6), 0))
+        else:
+            self.action_hint.pack_forget()
         self._render_menu(row, operation.get("pending", False))
         message = row.get("reconnect_message", "")
         if message and not warning:
             self.detail_warning.configure(text=message)
-            self.detail_warning.pack(after=self.detail_phase, fill="x", pady=(0, self.ui.px(12)))
+            self.detail_warning.pack(fill="x", pady=(self.ui.px(8), 0))
 
     def _render_menu(self, row, pending):
         # Right-click and detail buttons use the same policy, including keyboard invocation.

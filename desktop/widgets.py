@@ -107,6 +107,57 @@ def format_task_mini_badge(tasks, is_lighted=1, has_medal=True):
     return " ".join(parts) if parts else "—"
 
 
+class SlimScrollbar(tk.Canvas):
+    """A narrow scroll thumb, invisible when the content already fits."""
+
+    def __init__(self, parent, surface, px):
+        super().__init__(parent, width=px(8), bg=parent.cget("bg"), bd=0,
+                         highlightthickness=0, cursor="arrow")
+        self.surface, self.px = surface, px
+        self.first, self.last, self.drag = 0.0, 1.0, None
+        self.pack(side="right", fill="y")
+        surface.configure(yscrollcommand=self.set)
+        self.bind("<Configure>", lambda _: self._draw())
+        self.bind("<Button-1>", self._press)
+        self.bind("<B1-Motion>", self._move)
+        self.bind("<ButtonRelease-1>", lambda _: setattr(self, "drag", None))
+
+    def set(self, first, last):
+        self.first, self.last = float(first), float(last)
+        self._draw()
+
+    def _thumb(self):
+        height = max(1, self.winfo_height())
+        visible = max(0.0, min(1.0, self.last - self.first))
+        size = min(height, max(self.px(24), height * visible))
+        top = (height - size) * self.first / max(0.001, 1 - visible)
+        return top, size, visible
+
+    def _draw(self):
+        self.delete("all")
+        if self.first <= 0 and self.last >= 1:
+            return
+        top, size, _ = self._thumb()
+        self.create_rectangle(self.px(2), top, self.winfo_width() - self.px(2),
+                              top + size, fill="#c8d5d0", outline="")
+
+    def _press(self, event):
+        if self.last - self.first >= 1:
+            return
+        top, size, visible = self._thumb()
+        if not top <= event.y <= top + size:
+            fraction = event.y / max(1, self.winfo_height()) - visible / 2
+            self.surface.yview_moveto(max(0, min(1 - visible, fraction)))
+        self.drag = (event.y, self.first)
+
+    def _move(self, event):
+        if self.drag is None:
+            return
+        _, size, visible = self._thumb()
+        fraction = self.drag[1] + (event.y - self.drag[0]) * (1 - visible) / max(1, self.winfo_height() - size)
+        self.surface.yview_moveto(max(0, min(1 - visible, fraction)))
+
+
 class ModernButton(tk.Button):
     """Native keyboard/accessibility behavior with rounded bitmap backgrounds."""
 
