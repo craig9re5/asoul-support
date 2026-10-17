@@ -85,3 +85,31 @@ class WorkbenchTests(unittest.TestCase):
         request = opener.open.call_args.args[0]
         self.assertFalse(request.has_header("Cookie"))
         response.read.assert_called_once_with(5)
+
+    def test_measure_cache_avoids_repeated_font_fallback(self):
+        # Emoji fall back through the font stack and measure ~5ms each; the list
+        # re-elides every row per refresh, so widths must be memoised per font spec.
+        from desktop import room_list
+
+        room_list._MEASURE_CACHE.clear()
+        font = Mock()
+        font.actual.return_value = {"family": "test", "size": 9}
+        font.measure.return_value = 42
+        self.assertEqual(room_list.measure(font, "💬2/5"), 42)
+        self.assertEqual(room_list.measure(font, "💬2/5"), 42)
+        self.assertEqual(font.measure.call_count, 1)
+        self.assertEqual(room_list.measure(font, "other"), 42)
+        self.assertEqual(font.measure.call_count, 2)
+
+    def test_font_for_reuses_one_object_per_spec(self):
+        from desktop import room_list
+
+        room_list._FONT_CACHE.clear()
+        widget = Mock()
+        widget.cget.return_value = ("Microsoft YaHei UI", 9)
+        with patch("desktop.room_list.tkfont.Font") as factory:
+            factory.side_effect = lambda **_: Mock()
+            first = room_list.font_for(widget)
+            second = room_list.font_for(widget)
+        self.assertIs(first, second)
+        self.assertEqual(factory.call_count, 1)

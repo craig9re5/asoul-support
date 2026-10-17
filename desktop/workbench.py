@@ -39,7 +39,8 @@ class Workbench:
         header.pack(fill="x", pady=(0,p(10)))
         self.heading = label(header, "监控总览", size=18, bg=BG, bold=True)
         self.heading.pack(side="left")
-        ui.badge_frame = tk.Frame(header, bg="#ecfdf5", padx=p(8), pady=p(5))
+        ui.badge_frame = tk.Frame(header, bg="#ecfdf5", padx=p(8), pady=p(5),
+                                  highlightbackground="#a7f3d0", highlightthickness=1)
         ui.badge_frame.pack(side="right")
         ui.account_label = label(ui.badge_frame, "正在验证登录…", size=9, bg="#ecfdf5")
         ui.account_label.pack()

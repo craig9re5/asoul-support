@@ -14,7 +14,7 @@ from .secret_store import is_envelope, seal, unseal, discard
 from .redaction import redact, register_secrets, forget_secrets
 
 EVENT_CONTEXT = ContextVar("activity_context", default={})
-APP_VERSION = "2026.10.12.3"
+APP_VERSION = "2026.10.12.5"
 
 
 def data_dir():

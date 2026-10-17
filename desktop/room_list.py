@@ -8,9 +8,38 @@ from .widgets import FONT_FAMILY, SlimScrollbar
 
 BACKGROUND = "#ffffff"
 SELECTED = "#edf3f1"
+LIVE = "#f0fdf4"
 INK = "#253638"
 MUTED = "#657477"
-ROW_HEIGHT = 64
+PLACEHOLDER = "#94a3b8"
+ROW_HEIGHT = 70
+
+# Measuring a string costs ~0.15ms, but emoji fall back through the font stack and
+# cost ~5ms. The list re-elides every row on each refresh, so cache by (font, text).
+_MEASURE_CACHE = {}
+_FONT_CACHE = {}
+
+
+def font_for(widget):
+    """Reuse one Font object per spec; constructing one per row is not free."""
+    spec = widget.cget("font")
+    key = spec if isinstance(spec, str) else tuple(spec)
+    font = _FONT_CACHE.get(key)
+    if font is None:
+        font = tkfont.Font(font=spec)
+        _FONT_CACHE[key] = font
+    return font
+
+
+def measure(font, text):
+    key = (tuple(sorted(font.actual().items())), text)
+    width = _MEASURE_CACHE.get(key)
+    if width is None:
+        width = font.measure(text)
+        if len(_MEASURE_CACHE) > 20000:
+            _MEASURE_CACHE.clear()
+        _MEASURE_CACHE[key] = width
+    return width
 
 
 class RoomList(tk.Frame):
@@ -37,30 +66,36 @@ class RoomList(tk.Frame):
 
     def _fit_headline(self, item, width):
         available = max(1, width - self.ui.px(66))
-        name_font = tkfont.Font(font=item["name"].cget("font"))
+        name_font = font_for(item["name"])
         name = self._elide(item.get("name_text", ""), name_font, int(available * 0.48))
         item["name"].configure(text=name)
-        title_font = tkfont.Font(font=item["title"].cget("font"))
+        title_font = font_for(item["title"])
         item["title"].configure(text=self._elide(item.get("title_text", ""), title_font,
-                                               available - name_font.measure(name) - self.ui.px(10)))
+                                               available - measure(name_font, name) - self.ui.px(14)))
         column_width = max(1, available // 3)
         for column in range(3):
             item["metadata"].columnconfigure(column, minsize=column_width, weight=1, uniform="metadata")
         for key, text in item.get("metadata_text", {}).items():
-            font = tkfont.Font(font=item[key].cget("font"))
+            font = font_for(item[key])
             item[key].configure(text=self._elide(text, font, column_width - self.ui.px(8)))
+        # Task badge and heartbeat share one row; reserve the badge its natural width.
+        heartbeat_font = font_for(item["heartbeat"])
+        item["heartbeat"].configure(text=item.get("heartbeat_text", ""))
+        badge_width = available - measure(heartbeat_font, item.get("heartbeat_text", "")) - self.ui.px(12)
+        badge_font = font_for(item["tasks"])
+        item["tasks"].configure(text=self._elide(item.get("tasks_text", ""), badge_font, badge_width))
 
     @staticmethod
     def _elide(text, font, width):
         text = " ".join(str(text).split())
-        if font.measure(text) <= width:
+        if measure(font, text) <= width:
             return text
-        if font.measure("…") > width:
+        if measure(font, "…") > width:
             return ""
         left, right = 0, len(text)
         while left < right:
             middle = (left + right + 1) // 2
-            if font.measure(text[:middle] + "…") <= width:
+            if measure(font, text[:middle] + "…") <= width:
                 left = middle
             else:
                 right = middle - 1
@@ -121,7 +156,7 @@ class RoomList(tk.Frame):
 
     def insert(self, _parent, _position, *, iid, values, tags=()):
         p = self.ui.px
-        frame = tk.Frame(self.content, bg=BACKGROUND, padx=p(12), pady=p(8), height=p(ROW_HEIGHT))
+        frame = tk.Frame(self.content, bg=BACKGROUND, padx=p(12), pady=p(2), height=p(ROW_HEIGHT))
         frame.pack(fill="x")
         frame.grid_propagate(False)
         frame.columnconfigure(1, weight=1)
@@ -139,18 +174,27 @@ class RoomList(tk.Frame):
             label.grid(row=0, column=column, sticky="ew", padx=(0, p(8) if column == 0 else 0))
             labels[name] = label
         metadata = tk.Frame(frame, bg=BACKGROUND)
-        metadata.grid(row=1, column=1, sticky="ew", pady=(p(3), 0))
+        metadata.grid(row=1, column=1, sticky="ew")
         for column, (name, color) in enumerate((("phase", MUTED), ("medal", INK), ("gain", "#2d6763"))):
             metadata.columnconfigure(column, weight=1, uniform="metadata")
             labels[name] = tk.Label(metadata, bg=BACKGROUND, fg=color,
                                     anchor="e" if name == "gain" else "w", font=(FONT_FAMILY, 9), width=1, padx=0, pady=0)
             labels[name].grid(row=0, column=column, sticky="ew", padx=(0, p(8) if column < 2 else 0))
+        progress = tk.Frame(frame, bg=BACKGROUND)
+        progress.grid(row=2, column=1, sticky="ew")
+        progress.columnconfigure(0, weight=1)
+        labels["tasks"] = tk.Label(progress, bg=BACKGROUND, fg=MUTED, anchor="w",
+                                   font=(FONT_FAMILY, 8), width=1, padx=0, pady=0)
+        labels["tasks"].grid(row=0, column=0, sticky="ew")
+        labels["heartbeat"] = tk.Label(progress, bg=BACKGROUND, fg=MUTED, anchor="e",
+                                       font=(FONT_FAMILY, 8), padx=0, pady=0)
+        labels["heartbeat"].grid(row=0, column=1, sticky="e", padx=(p(8), 0))
         line = tk.Frame(frame, height=1, bg="#e2e8e6")
-        line.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(p(8), 0))
+        line.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(p(1), 0))
         self.items[iid] = {"frame": frame, "avatar": avatar, "metadata": metadata, "headline": headline,
-                           "values": values, "tags": tags, **labels}
+                           "progress": progress, "values": values, "tags": tags, **labels}
         self.order.append(iid)
-        for widget in (frame, avatar, headline, metadata, *labels.values()):
+        for widget in (frame, avatar, headline, metadata, progress, *labels.values()):
             widget.bind("<Button-1>", lambda _, key=iid: self._pick(key))
             widget.bind("<Double-1>", lambda _, key=iid: (self._pick(key), self.ui.on_open_room()))
             widget.bind("<Button-3>", lambda event, key=iid: self._context(key, event))
@@ -160,8 +204,14 @@ class RoomList(tk.Frame):
 
     def _paint(self, iid):
         item = self.items[iid]
-        bg = SELECTED if iid == self.selected else BACKGROUND
-        for key in ("frame", "name", "title", "headline", "metadata", "phase", "medal", "gain"):
+        if iid == self.selected:
+            bg = SELECTED
+        elif "live" in item.get("tags", ()):
+            bg = LIVE
+        else:
+            bg = BACKGROUND
+        for key in ("frame", "name", "title", "headline", "metadata", "progress",
+                    "phase", "medal", "gain", "tasks", "heartbeat"):
             item[key].configure(bg=bg)
         if item.get("photo"):
             item["avatar"].configure(bg=bg)
@@ -173,12 +223,17 @@ class RoomList(tk.Frame):
             return {"values": item["values"], "tags": item["tags"]}
         values = item["values"]
         row = self.ui.rows_cache.get(iid, {})
-        item["name_text"] = row.get("name") or values[0]
+        item["name_text"] = values[0] or row.get("name", "")
         item["title_text"] = values[1]
         item["metadata_text"] = {"phase": values[4], "medal": values[2].split("\n")[0],
                                  "gain": gain_label(row) if row.get("medal_name") else ""}
+        item["tasks_text"] = values[3]
+        item["heartbeat_text"] = "" if values[5] == "—" else values[5]
         self._fit_headline(item, self.canvas.winfo_width())
         item["phase"].configure(fg="#a65c00" if row.get("watch_warning") or row.get("connection_warning") else MUTED)
+        if "placeholder" in item.get("tags", ()):
+            for key in ("name", "title", "phase", "medal", "gain", "tasks", "heartbeat"):
+                item[key].configure(fg=PLACEHOLDER)
         if not item.get("photo"):
             item["avatar"].configure(text=row.get("name", "?")[:1])
         self._paint(iid)

@@ -50,8 +50,8 @@ def main():
                 assert ui.tree.selection() == ("2",)
                 assert ui.tree.focus() == "2"
                 assert ui.workbench.detail_gain.master == ui.workbench.detail_medal.master
-                detail_children = ui.workbench.detail_frame.pack_slaves()
-                assert detail_children.index(ui.workbench.detail_medal) < detail_children.index(ui.workbench.detail_gain)
+                summary_children = ui.workbench.detail_gain.master.pack_slaves()
+                assert summary_children.index(ui.workbench.detail_gain) < summary_children.index(ui.workbench.detail_medal)
                 item = ui.tree.items["2"]
                 assert item["phase"].master == item["medal"].master == item["gain"].master
                 assert {item[key].grid_info()["row"] for key in ("phase", "medal", "gain")} == {0}
@@ -133,8 +133,9 @@ def main():
                 assert "重连此直播间" in ui.footer.get()
                 assert ui.workbench.reconnect_button.cget("state") == "normal"
                 assert "长时间没有成功心跳" in ui.workbench.detail_warning.cget("text")
-                detail_children = ui.workbench.detail_frame.pack_slaves()
-                assert detail_children.index(ui.workbench.detail_phase) + 1 == detail_children.index(ui.workbench.detail_warning)
+                connection_children = ui.workbench.connection_card.pack_slaves()
+                assert ui.workbench.detail_phase.master.master == ui.workbench.connection_card
+                assert connection_children.index(ui.workbench.detail_heartbeat) < connection_children.index(ui.workbench.detail_warning)
                 assert ui.tree.items["2"]["phase"].cget("fg") == "#a65c00"
                 ui.tray.notify.assert_called_once()
                 with patch.object(engine, "reconnect_room", return_value=(False, "模拟网络失败，请重试。")) as reconnect, \
