@@ -3,6 +3,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch, Mock
 try:
     from PIL import Image
@@ -113,3 +114,29 @@ class WorkbenchTests(unittest.TestCase):
             second = room_list.font_for(widget)
         self.assertIs(first, second)
         self.assertEqual(factory.call_count, 1)
+
+    def test_detail_clears_when_selection_is_empty(self):
+        """A stale detail panel kept the old room's buttons live after deselect."""
+        from desktop import workbench as wb_module
+
+        widgets = {}
+        wb = object.__new__(wb_module.Workbench)
+        wb.ui = SimpleNamespace(px=lambda v: v, rows_cache={}, room_actions={})
+        for name in ("detail_title", "detail_live_title", "detail_phase", "detail_medal",
+                     "detail_gain", "detail_exp", "detail_heartbeat", "detail_warning",
+                     "open_button", "redo_button", "reconnect_button", "action_hint"):
+            widgets[name] = Mock()
+            setattr(wb, name, widgets[name])
+        wb.task_labels = [("弹幕", Mock()), ("观看", Mock())]
+        wb.experience_fraction = 0.5
+        wb._draw_experience = Mock()
+        wb._render_menu = Mock()
+
+        wb._render_no_selection()
+
+        self.assertEqual(widgets["detail_title"].configure.call_args.kwargs["text"], "未选择直播间")
+        for name in ("open_button", "redo_button", "reconnect_button"):
+            self.assertEqual(widgets[name].configure.call_args.kwargs["state"], "disabled")
+        widgets["detail_warning"].pack_forget.assert_called_once_with()
+        widgets["action_hint"].pack_forget.assert_called_once_with()
+        self.assertEqual(wb.experience_fraction, 0)

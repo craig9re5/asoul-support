@@ -55,9 +55,10 @@ class Workbench:
         label(self.list_frame, "关注的直播间", size=10, bold=True).pack(anchor="w", padx=p(12), pady=p(8))
         ui.tree = RoomList(self.list_frame, ui)
         ui.tree.pack(fill="both", expand=True)
-        ui.tree.bind("<<TreeviewSelect>>", lambda _: self.render_detail())
+        ui.tree.bind("<<TreeviewSelect>>", self._on_selection)
         self._build_detail()
         self.settings_host = tk.Frame(self.body, bg=BG)
+        self._user_deselected = False
 
     def _build_detail(self):
         ui, p = self.ui, self.ui.px
@@ -93,7 +94,7 @@ class Workbench:
         self.connection_card.pack(fill="x", pady=(0, p(12)))
         status_row = tk.Frame(self.connection_card, bg="#f0f6f3")
         status_row.pack(fill="x")
-        self.reconnect_button = ModernButton(status_row, text="重连", command=ui.on_reconnect_room,
+        self.reconnect_button = ModernButton(status_row, text="⟳ 重连", command=ui.on_reconnect_room,
                                             primary=True, px=p, state="disabled")
         self.reconnect_button.pack(side="right", padx=(p(8), 0))
         self.detail_phase = label(status_row, "", size=9, color=ACCENT, bg="#f0f6f3", bold=True)
@@ -120,7 +121,7 @@ class Workbench:
         label(task_heading, "今日任务", size=10, bold=True).pack(side="left")
         label(task_heading, "服务端进度", size=8, color=MUTED).pack(side="right")
         self.task_labels = []
-        for title in ("弹幕", "点赞", "看播", "灯牌"):
+        for title in ("弹幕", "点赞", "观看", "灯牌"):
             row = tk.Frame(self.detail_frame, bg="white", pady=p(8))
             row.pack(fill="x")
             label(row, title, size=10).pack(side="left")
@@ -128,17 +129,17 @@ class Workbench:
             value.pack(side="right")
             self.task_labels.append((title, value))
             tk.Frame(self.detail_frame, bg="#edf1ef", height=1).pack(fill="x")
-        note = label(self.detail_frame, "任务完成后的亲密度以服务端实际结算为准。", size=8, color=MUTED)
+        note = label(self.detail_frame, "亲密度以服务端实际结算为准", size=8, color=MUTED)
         note.configure(wraplength=p(285))
         note.pack(fill="x", pady=(p(10), 0))
         action = self.detail_actions
         action_row = tk.Frame(action, bg="white")
         action_row.pack(fill="x")
-        self.open_button = ModernButton(action_row, text="打开直播间", command=ui.on_open_room, px=p)
+        self.open_button = ModernButton(action_row, text="↗ 直播间", command=ui.on_open_room, px=p)
         self.open_button.pack(side="left")
-        self.redo_button = ModernButton(action_row, text="补齐任务", command=lambda: ui.on_redo_task("all"), px=p)
+        self.redo_button = ModernButton(action_row, text="✓ 补齐任务", command=lambda: ui.on_redo_task("all"), px=p)
         self.redo_button.pack(side="left", padx=(p(8),0))
-        self.action_hint = label(action, "请选择主播后操作", size=8, color=MUTED)
+        self.action_hint = label(action, "", size=8, color=MUTED)
         self.action_hint.configure(wraplength=p(285))
         self.action_hint.pack(fill="x", pady=(p(6), 0))
         def bind_wheel(widget):
@@ -177,7 +178,7 @@ class Workbench:
             ("monitor", "监控总览", lambda: self.show_page("monitor")),
             ("automation", "自动化设置", ui.open_settings),
             ("account", "账号管理", lambda: ui.open_settings(focus_auth=True)),
-            ("history", "活动记录", lambda: os.startfile(str(ui.engine.root / "logs"))),
+            ("history", "打开日志目录", lambda: os.startfile(str(ui.engine.root / "logs"))),
         ):
             self.nav_photos[page] = [ImageTk.PhotoImage(navigation_icon(page, p(17), color), master=side)
                                      for color in ("#aac1b9", "#88dfc4")]
@@ -231,13 +232,13 @@ class Workbench:
         ui, p = self.ui, self.ui.px
         self.toolbar = tk.Frame(self.body, bg="#e9f4ed", padx=p(8), pady=p(5))
         self.toolbar.pack(fill="x", pady=(0,p(10)))
-        ui.safety_button = ModernButton(self.toolbar, text="处理异常", command=ui.on_recovery_action,
+        ui.safety_button = ModernButton(self.toolbar, text="⚠ 处理异常", command=ui.on_recovery_action,
                                        px=p, state="disabled")
         ui.safety_button.pack(side="right", padx=(p(6),0))
-        ui.pause_button = ModernButton(self.toolbar, text="暂停挂机", command=lambda: ui.commands.put("toggle"),
+        ui.pause_button = ModernButton(self.toolbar, text="⏸ 暂停挂机", command=lambda: ui.commands.put("toggle"),
                                       primary=True, accent=ACCENT, accent_hover="#245550", px=p)
         ui.pause_button.pack(side="right", padx=(p(6),0))
-        self.check_button = ModernButton(self.toolbar, text="立即检查", command=lambda: ui.commands.put("check"), px=p)
+        self.check_button = ModernButton(self.toolbar, text="⟳ 立即检查", command=lambda: ui.commands.put("check"), px=p)
         self.check_button.pack(side="right", padx=(p(6),0))
         ui.summary = tk.StringVar(value="正在启动…")
         ui.summary_label = tk.Label(self.toolbar, textvariable=ui.summary, bg="#e9f4ed", fg="#24634e",
@@ -248,7 +249,7 @@ class Workbench:
         ui, p = self.ui, self.ui.px
         self.footer_bar = tk.Frame(self.body, bg=BG)
         self.footer_bar.pack(side="bottom", fill="x", pady=(p(8),0))
-        for text, command in (("添加主播", ui.open_add_member), ("同步粉丝牌", ui.open_sync_medals)):
+        for text, command in (("＋ 添加主播", ui.open_add_member), ("⟳ 同步粉丝牌", ui.open_sync_medals)):
             ModernButton(self.footer_bar, text=text, command=command, px=p).pack(side="right", padx=(p(6),0))
         ui.footer = tk.StringVar()
         ui.footer_label = tk.Label(self.footer_bar, textvariable=ui.footer, bg=BG, fg=MUTED,
@@ -258,7 +259,9 @@ class Workbench:
 
     def render(self, snap):
         self.snap = snap
-        if not self.ui.tree.selection() and snap["rows"]:
+        # Select the first room only on first paint; re-selecting on every refresh
+        # would silently undo a user's deselect and keep the old detail panel live.
+        if not self.ui.tree.selection() and snap["rows"] and not self._user_deselected:
             self.ui.tree.selection_set(str(snap["rows"][0]["room"]))
         for row in snap["rows"]:
             uid = row.get("uid")
@@ -280,6 +283,9 @@ class Workbench:
     def render_detail(self):
         selected = self.ui.tree.selection()
         row = self.ui.rows_cache.get(selected[0], {}) if selected else {}
+        if not row:
+            self._render_no_selection()
+            return
         notice_key = (row.get("room"), row.get("connection_warning"), row.get("watch_warning"))
         previous = getattr(self, "detail_notice_key", None)
         if notice_key != previous and (previous is None or notice_key[0] != previous[0]
@@ -297,7 +303,7 @@ class Workbench:
         self.experience_fraction = min(1, max(0, (row.get("intimacy") or 0) / target)) if target > 0 and not row.get("tasks_stale", True) else 0
         self._draw_experience()
         for keyword, widget in self.task_labels:
-            words = ("观看", "看播") if keyword == "看播" else (keyword,)
+            words = ("观看", "看播") if keyword == "观看" else (keyword,)
             task = next((t for t in row.get("tasks", []) if any(word in t.get("title", "") for word in words)), None)
             value = "待更新" if not task else "已完成" if task.get("is_done") else task.get("sub_title", "未完成")
             progress = re.search(r"(\d+)\s*/\s*(\d+)", value)
@@ -322,11 +328,11 @@ class Workbench:
         else:
             self.detail_warning.pack_forget()
         redo_reason = action_reason(self.snap, row, "redo", operation.get("pending", False))
-        self.redo_button.configure(state="disabled" if redo_reason else "normal", text="补齐中…" if operation.get("pending") and operation.get("kind") == "redo" else "补齐任务")
+        self.redo_button.configure(state="disabled" if redo_reason else "normal", text="✓ 补齐中…" if operation.get("pending") and operation.get("kind") == "redo" else "✓ 补齐任务")
         pending = operation.get("pending", False) and operation.get("kind") == "reconnect"
         reconnect_reason = action_reason(self.snap, row, "reconnect", operation.get("pending", False) or pending)
         self.reconnect_button.configure(state="disabled" if reconnect_reason else "normal",
-                                        text="重连中…" if row.get("reconnecting") or pending else "重连")
+                                        text="⟳ 重连中…" if row.get("reconnecting") or pending else "⟳ 重连")
         self.open_button.configure(state="disabled" if action_reason(self.snap, row, "open") else "normal")
         reasons = list(dict.fromkeys(reason for reason in (reconnect_reason, redo_reason) if reason))
         hint = "\n".join(reasons)
@@ -340,6 +346,31 @@ class Workbench:
         if message and not warning:
             self.detail_warning.configure(text=message)
             self.detail_warning.pack(fill="x", pady=(self.ui.px(8), 0))
+
+    def _on_selection(self, _=None):
+        self._user_deselected = not self.ui.tree.selection()
+        self.render_detail()
+
+    def _render_no_selection(self):
+        """Never leave the previous room's details and live buttons behind."""
+        self.detail_title.configure(text="未选择直播间")
+        self.detail_live_title.configure(text="从左侧选择一个直播间查看详情")
+        self.detail_phase.configure(text="", fg=MUTED)
+        self.detail_medal.configure(text="")
+        self.detail_gain.configure(text="")
+        self.detail_exp.configure(text="")
+        self.detail_heartbeat.configure(text="")
+        self.detail_warning.pack_forget()
+        self.experience_fraction = 0
+        self._draw_experience()
+        for _, widget in self.task_labels:
+            widget.configure(text="", fg=MUTED)
+        for button in (self.open_button, self.redo_button, self.reconnect_button):
+            button.configure(state="disabled")
+        self.action_hint.configure(text="")
+        self.action_hint.pack_forget()
+        self.detail_notice_key = None
+        self._render_menu({}, False)
 
     def _render_menu(self, row, pending):
         # Right-click and detail buttons use the same policy, including keyboard invocation.

@@ -486,7 +486,7 @@ class TrayUI:
             self.tray.icon = icon_image(color)
             self.last_color = color
         pause_pending = "pause" in self.control_actions
-        self.pause_button.configure(text="正在处理…" if pause_pending else "恢复挂机" if snap["paused"] else "暂停挂机",
+        self.pause_button.configure(text="⏳ 正在处理…" if pause_pending else "▶ 恢复挂机" if snap["paused"] else "⏸ 暂停挂机",
                                     state="disabled" if pause_pending or self.closing else "normal")
         self.workbench.check_button.configure(state="disabled" if self.closing or "check" in self.control_actions else "normal")
         self.recovery_target = recovery_route(snap)
@@ -513,8 +513,8 @@ class TrayUI:
                 "end",
                 iid="_empty",
                 values=(
-                    "(暂无监控主播)",
-                    "点击下方【➕ 添加主播】或【📥 同步粉丝牌】开启挂机",
+                    "(还没有添加主播)",
+                    "用右下角的「＋ 添加主播」开始，或「⟳ 同步粉丝牌」一键导入",
                     "—",
                     "—",
                     "等待添加",

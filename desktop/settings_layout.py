@@ -5,7 +5,7 @@ from .windows import is_autostart_enabled
 
 def build_automation(self, container, config, p):
     tk.Label(
-        container, text="开播自动化策略", font=(FONT_FAMILY, 10, "bold"), bg=BG_WINDOW, fg=TEXT_MAIN
+        container, text="自动任务", font=(FONT_FAMILY, 10, "bold"), bg=BG_WINDOW, fg=TEXT_MAIN
     ).pack(anchor="w", pady=(0, p(4)))
     card_auto = CardFrame(container, px=p)
     card_auto.pack(fill="x", pady=(0, p(14)))
@@ -13,7 +13,7 @@ def build_automation(self, container, config, p):
     create_setting_row(
         card_auto,
         "自动复活点亮粉丝牌",
-        "检测到勋章熄灭时，自动向房间发送 10 条应援弹幕复活点亮",
+        "粉丝牌熄灭时，自动发 10 条弹幕重新点亮",
         lambda r: ToggleSwitch(r, variable=self.var_auto_revive, px=p),
         px=p,
     )
@@ -22,7 +22,7 @@ def build_automation(self, container, config, p):
     create_setting_row(
         card_auto,
         "自动完成每日弹幕任务",
-        "按服务端剩余进度发送弹幕，巡检确认任务完成",
+        "按剩余进度发送，自动确认是否完成",
         lambda r: ToggleSwitch(r, variable=self.var_auto_danmu, px=p),
         px=p,
     )
@@ -33,7 +33,7 @@ def build_automation(self, container, config, p):
     create_setting_row(
         card_auto,
         "直播间点赞（实验性）",
-        "默认关闭；接口成功不代表任务已记账",
+        "默认关闭。实验性，接口成功不等于任务完成",
         lambda r: ToggleSwitch(r, variable=self.var_auto_like, px=p),
         px=p,
     )
@@ -41,15 +41,15 @@ def build_automation(self, container, config, p):
 
 def build_system(self, container, config, p):
     tk.Label(
-        container, text="系统与提醒", font=(FONT_FAMILY, 10, "bold"), bg=BG_WINDOW, fg=TEXT_MAIN
+        container, text="系统", font=(FONT_FAMILY, 10, "bold"), bg=BG_WINDOW, fg=TEXT_MAIN
     ).pack(anchor="w", pady=(0, p(4)))
     card_sys = CardFrame(container, px=p)
     card_sys.pack(fill="x", pady=(0, p(14)))
     self.var_notify = tk.BooleanVar(value=bool(config.get("notify_on_live", True)))
     create_setting_row(
         card_sys,
-        "开播桌面通知 (Toast)",
-        "关注的主播开播时，在 Windows 屏幕右下角弹出气泡提醒",
+        "开播通知",
+        "开播时在屏幕右下角提醒",
         lambda r: ToggleSwitch(r, variable=self.var_notify, px=p),
         px=p,
     )
@@ -58,7 +58,7 @@ def build_system(self, container, config, p):
     create_setting_row(
         card_sys,
         "开机自动启动",
-        "随 Windows 开机启动并在后台静默托盘运行",
+        "开机后在托盘静默运行",
         lambda r: ToggleSwitch(r, variable=self.var_autostart, px=p),
         px=p,
     )
@@ -87,8 +87,8 @@ def build_system(self, container, config, p):
 
     create_setting_row(
         card_sys,
-        "开播巡检频率",
-        "后台轮询检查关注主播开播状态的时间间隔（推荐 15~30 分钟）",
+        "检查频率",
+        "多久检查一次是否开播，推荐 15~30 分钟",
         make_interval_box,
         px=p,
     )

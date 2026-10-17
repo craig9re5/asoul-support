@@ -150,7 +150,7 @@ def main():
                 engine.manual_reconnects[2] = {"state": "checking", "cooldown_until": time.time() + 60}
                 ui.refresh()
                 assert ui.workbench.reconnect_button.cget("state") == "disabled"
-                assert ui.workbench.reconnect_button.cget("text") == "重连中…"
+                assert "重连中" in ui.workbench.reconnect_button.cget("text")
                 engine.manual_reconnects.clear()
                 engine.paused = True
                 ui.refresh()
@@ -166,10 +166,10 @@ def main():
                 engine.safety = {"blocked": True, "kind": "network", "until": time.time() + 60,
                                  "reason": "心跳连接异常"}
                 ui.refresh()
-                assert ui.safety_button.cget("text") == "查看冷却说明"
+                assert "查看冷却说明" in ui.safety_button.cget("text")
                 engine.safety = {"blocked": True, "kind": "auth", "reason": "登录失效"}
                 ui.refresh()
-                assert ui.safety_button.cget("text") == "重新扫码登录"
+                assert "重新扫码登录" in ui.safety_button.cget("text")
                 engine.safety = {"blocked": True, "kind": "review", "reason": "测试账号保护暂停"}
                 ui.refresh()
                 assert ui.rows_cache["2"]["phase"] == "账号保护暂停"
@@ -304,10 +304,10 @@ def main():
                     add.do_search()
                     assert not add.searching
                     assert add.search_btn.cget("state") == "normal"
-                    assert "重试" in add.preview_text.get() and "synthetic-secret" not in add.preview_text.get()
+                    assert "查询失败" in add.preview_text.get() and "synthetic-secret" not in add.preview_text.get()
                 add.query_var.set("changed-input")
                 add.on_search_done({"room": 999}, query="old-input")
-                assert "忽略" in add.preview_text.get()
+                assert "输入已修改" in add.preview_text.get()
                 assert add.add_btn.cget("state") == "disabled"
                 add.destroy()
                 add.on_search_done(None)

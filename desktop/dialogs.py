@@ -39,7 +39,7 @@ def apply_saved_settings(panel):
             if hasattr(panel, "winfo_exists") and not panel.winfo_exists():
                 return
             if hasattr(panel, "save_button"):
-                panel.save_button.configure(state="normal", text="保存账号" if panel.scope == "account" else "保存设置")
+                panel.save_button.configure(state="normal", text="保存设置")
                 panel.save_status.set(message)
             if ok:
                 panel.on_saved()
@@ -64,9 +64,11 @@ class SettingsPanel(tk.Frame):
         config, _ = load_config(engine.root)
         bottom = tk.Frame(self, bg=BG_WINDOW, pady=p(8))
         bottom.pack(side="bottom", fill="x")
-        self.save_button = ModernButton(bottom, text="保存账号" if scope == "account" else "保存设置",
-                                        primary=True, command=self.do_save, px=p)
-        self.save_button.pack(side="right")
+        # The account page saves nothing itself: QR login persists the session on success.
+        if scope != "account":
+            self.save_button = ModernButton(bottom, text="保存设置",
+                                            primary=True, command=self.do_save, px=p)
+            self.save_button.pack(side="right")
         self.save_status = tk.StringVar(value="")
         tk.Label(bottom, textvariable=self.save_status, bg=BG_WINDOW, fg=TEXT_MUTED,
                  font=(FONT_FAMILY,9), anchor="w").pack(side="left", fill="x", expand=True)
@@ -233,7 +235,7 @@ class AddMemberDialog(tk.Toplevel):
         ).pack(anchor="w")
         tk.Label(
             container,
-            text="支持输入房间长号、短号、主播 UID 或直播间链接",
+            text="房间号、主播 UID 或直播间链接",
             font=(FONT_FAMILY, 9),
             bg=BG_WINDOW,
             fg=TEXT_MUTED,
@@ -276,7 +278,7 @@ class AddMemberDialog(tk.Toplevel):
         self.search_btn.pack(side="right")
         self.preview_card = CardFrame(container, px=p, pady=12)
         self.preview_card.pack(fill="both", expand=True, pady=(0, p(12)))
-        self.preview_text = tk.StringVar(value="💡 请在上方输入主播信息并点击识别查询")
+        self.preview_text = tk.StringVar(value="输入房间号或 UID，然后点「识别查询」")
         self.preview_label = tk.Label(
             self.preview_card,
             textvariable=self.preview_text,
@@ -300,7 +302,7 @@ class AddMemberDialog(tk.Toplevel):
         if self.resolved_info and self.query_var.get().strip() != self.last_query:
             self.resolved_info = None
             self.add_btn.configure(state="disabled")
-            self.preview_text.set("💡 输入已更改，请重新点击识别查询")
+            self.preview_text.set("输入已修改，请重新查询")
             self.preview_label.configure(fg=TEXT_MUTED)
 
     def do_search(self):
@@ -308,7 +310,7 @@ class AddMemberDialog(tk.Toplevel):
             return
         query = self.query_var.get().strip()
         if not query:
-            self.preview_text.set("⚠️ 请先输入房间号、UID 或直播间链接后再查询")
+            self.preview_text.set("请先输入房间号、UID 或直播间链接")
             self.preview_label.configure(fg="#d97706")
             return
         self.last_query = query
@@ -316,14 +318,14 @@ class AddMemberDialog(tk.Toplevel):
         self.resolved_info = None
         self.add_btn.configure(state="disabled")
         self.search_btn.configure(state="disabled")
-        self.preview_text.set("⏳ 正在查询 B 站接口…")
+        self.preview_text.set("正在查询…")
         self.preview_label.configure(fg=TEXT_MUTED)
 
         def query_thread():
             try:
                 info, error = self.engine.application.resolve(query), ""
             except Exception as exc:
-                info, error = None, f"查询失败（{type(exc).__name__}），请核对网络后重试；登录失效可在账号管理扫码。"
+                info, error = None, f"查询失败（{type(exc).__name__}），请检查网络；登录失效可到账号管理重新扫码。"
             self.engine.dispatcher.post(lambda: self.on_search_done(info, query=query, error=error))
 
         self.engine.dispatcher.submit(query_thread)
@@ -336,20 +338,23 @@ class AddMemberDialog(tk.Toplevel):
         if query is not None and query != self.query_var.get().strip():
             self.resolved_info = None
             self.add_btn.configure(state="disabled")
-            self.preview_text.set("输入已改变，旧查询结果已忽略，请重新查询。")
+            self.preview_text.set("输入已修改，请重新查询")
             return
         if not info:
-            self.preview_text.set(error or "❌ 未查询到对应主播，请检查输入的房间号或 UID。")
+            self.preview_text.set(error or "没有找到这个主播，请检查房间号或 UID。")
             self.preview_label.configure(fg="#dc2626")
             self.add_btn.configure(state="disabled")
             self.resolved_info = None
             return
         members = read_json(self.engine.root / "members.json", [])
         is_existing = any((m.get("room") == info["room"] for m in members))
-        medal = f"【{info['medal_name']}】" if info.get("medal_name") else "（暂无勋章）"
-        text = f"👤 主播昵称： {info['name']}\n📺 直播房间： {info['room']}\n🆔 主播 UID： {info['uid']}\n🏅 粉丝勋章： {medal}"
+        medal = info.get("medal_name") or "暂无粉丝牌"
+        text = (f"昵称　　{info['name']}\n"
+                f"房间　　{info['room']}\n"
+                f"UID　　 {info['uid']}\n"
+                f"粉丝牌　{medal}")
         if is_existing:
-            text += "\n\n⚠️ 该主播已在监控列表中，无需重复添加。"
+            text += "\n\n该主播已在列表中。"
             self.preview_text.set(text)
             self.preview_label.configure(fg=TEXT_MAIN)
             self.add_btn.configure(state="disabled")
@@ -365,12 +370,12 @@ class AddMemberDialog(tk.Toplevel):
             return
         members = read_json(self.engine.root / "members.json", [])
         if any((m.get("room") == self.resolved_info["room"] for m in members)):
-            messagebox.showwarning("提示", "该主播已在监控列表中！", parent=self)
+            messagebox.showwarning("提示", "该主播已在列表中。", parent=self)
             return
         try:
             self.engine.application.add_members([self.resolved_info])
         except (OSError, ValueError, RuntimeError) as exc:
-            messagebox.showerror("添加失败", f"无法保存主播（{type(exc).__name__}），请核对配置和文件权限后重试。", parent=self)
+            messagebox.showerror("添加失败", f"保存失败（{type(exc).__name__}），请检查文件权限。", parent=self)
             return
         self.on_added()
         self.destroy()
@@ -534,16 +539,16 @@ class SyncMedalsDialog(tk.Toplevel):
         self.btn_retry.configure(state="normal")
         if total == 0:
             self.status_var.set(
-                "当前账号未查询到任何粉丝勋章（请确认登录凭证有效且账号拥有粉丝牌）。"
+                "当前账号没有粉丝牌。请确认已登录且确实拥有粉丝牌。"
             )
             self.btn_cancel.configure(text="关闭")
             return
         if not unmonitored:
-            self.status_var.set(f"您拥有的全部 {total} 个粉丝牌主播均已在监控列表中！")
+            self.status_var.set(f"{total} 个粉丝牌主播都已在列表中。")
             self.btn_cancel.configure(text="关闭")
             return
         self.status_var.set(
-            f"发现 {len(unmonitored)} 位未监控主播，勾选后点击导入即可开启自动监控："
+            f"发现 {len(unmonitored)} 位未添加的主播，勾选后导入："
         )
         self.btn_select_all.configure(state="normal")
         self.btn_import.configure(state="normal")
@@ -558,7 +563,7 @@ class SyncMedalsDialog(tk.Toplevel):
         if self.winfo_exists():
             self.fetching = False
             self.btn_retry.configure(state="normal")
-            self.status_var.set("查询失败，请检查登录及网络，点击“重新查询”重试。")
+            self.status_var.set("查询失败，请检查登录和网络后重试。")
             self.btn_cancel.configure(text="关闭")
 
     def on_click_item(self, event):
@@ -580,13 +585,13 @@ class SyncMedalsDialog(tk.Toplevel):
     def do_import(self):
         selected = [e["data"] for e in self.items_data if e["checked"]]
         if not selected:
-            messagebox.showinfo("提示", "请先勾选需要导入的主播！", parent=self)
+            messagebox.showinfo("提示", "请先勾选主播。", parent=self)
             return
         try:
             self.engine.application.add_members(selected)
         except (OSError, ValueError, RuntimeError) as exc:
-            messagebox.showerror("导入失败", f"无法保存关注列表（{type(exc).__name__}），请核对文件权限后重试。", parent=self)
+            messagebox.showerror("导入失败", f"保存失败（{type(exc).__name__}），请检查文件权限。", parent=self)
             return
-        messagebox.showinfo("导入成功", f"成功导入 {len(selected)} 位主播到监控列表！", parent=self)
+        messagebox.showinfo("导入成功", f"已添加 {len(selected)} 位主播。", parent=self)
         self.on_synced()
         self.destroy()
