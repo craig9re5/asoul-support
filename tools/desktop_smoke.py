@@ -198,7 +198,7 @@ def main():
                 ui.task_notice = ("", 0)
                 settings = SettingsDialog(ui.root, engine, ui.px, lambda: None)
                 settings.update_idletasks()
-                assert settings.e_sess.cget("show")
+                assert not hasattr(settings, "e_sess")
                 from desktop.qr_dialog import QrLoginDialog
                 from asoul_support.qr_login import PollResult
 
@@ -224,6 +224,22 @@ def main():
                 assert automation.winfo_toplevel() == ui.root
                 assert automation.winfo_ismapped() and not ui.tree.winfo_ismapped()
                 assert not hasattr(automation, "sessdata_var")
+                notification = automation.notification_panel
+                assert notification.winfo_toplevel() == ui.root
+                # Experimental section must stay inert until it has been validated end to end.
+                assert notification.token_entry.cget("show")
+                assert notification.token_entry.cget("state") == "disabled"
+                assert not notification.enabled.get()
+                assert all(button.cget("state") == "disabled" for button in notification.buttons)
+                notification.secret.set("T" * 32)
+                notification.save_values()
+                assert not notification.secret.get()
+                assert not (root / "pushplus.credentials.json").exists()
+                automation.canvas.yview_moveto(1.0)
+                ui.root.update()
+                assert notification.token_entry.winfo_ismapped()
+                assert notification.token_entry.winfo_width() > ui.px(100)
+
                 assert ui.workbench.nav_buttons["automation"].cget("bg") == "#2b4443"
                 assert ui.workbench.activity_button.winfo_rooty() > ui.workbench.nav_buttons["account"].winfo_rooty()
                 from desktop.widgets import ToggleSwitch
@@ -252,7 +268,7 @@ def main():
                 ui.open_settings(focus_auth=True)
                 account = ui.workbench.settings_pages["account"]
                 ui.root.update()
-                assert account.winfo_toplevel() == ui.root and account.e_sess.cget("show")
+                assert account.winfo_toplevel() == ui.root and not hasattr(account, "e_sess")
                 assert not hasattr(account, "interval_var")
                 from desktop.qr_dialog import QrLoginPanel
                 inline_qr = QrLoginPanel(account.qr_host, engine, ui.px, Mock(), session_factory=lambda: session)
@@ -264,10 +280,9 @@ def main():
                         break
                     time.sleep(0.05)
                 assert inline_qr.qr_image is not None and inline_qr.winfo_toplevel() == ui.root
-                account.e_sess.configure(show="")
                 ui.workbench.show_page("monitor")
                 ui.root.update()
-                assert inline_qr.cancelled.is_set() and account.e_sess.cget("show")
+                assert inline_qr.cancelled.is_set()
                 assert ui.tree.winfo_ismapped() and ui.tree.selection() == ("2",)
                 # Rounded buttons retain native disable/invoke behavior and transparent corners.
                 button = ui.workbench.check_button

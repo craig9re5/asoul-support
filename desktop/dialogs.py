@@ -1,7 +1,6 @@
 from .settings_layout import build_automation, build_system, build_auth
 import tkinter as tk
 from tkinter import ttk, messagebox
-import webbrowser
 import time
 
 try:
@@ -83,6 +82,9 @@ class SettingsPanel(tk.Frame):
         if scope in ("automation", "all"):
             build_automation(self, container, config, p)
             build_system(self, container, config, p)
+            from .notification_settings import NotificationSettings
+            self.notification_panel = NotificationSettings(container, engine, p)
+            self.notification_panel.pack(fill="x")
         if scope in ("account", "all"):
             try:
                 cookies = read_json(engine.root / "credentials.json", {})
@@ -108,18 +110,10 @@ class SettingsPanel(tk.Frame):
     def deactivate(self):
         if self.qr_panel is not None and self.qr_panel.winfo_exists():
             self.qr_panel.close()
-        # Do not leave revealed credentials visible after page navigation.
-        for field in ("e_sess", "e_jct"):
-            if hasattr(self, field):
-                getattr(self, field).configure(show="●")
 
     def set_auth_status(self, text, color):
         if hasattr(self, "status_label") and self.status_label.winfo_exists():
             self.status_label.configure(text=text, fg=color)
-
-    def on_credentials_changed(self, *_):
-        self.verified_pair = None
-        self.set_auth_status("登录信息已修改，保存前将重新验证", TEXT_MUTED)
 
     def open_qr_login(self):
         from .qr_dialog import QrLoginPanel
@@ -144,67 +138,12 @@ class SettingsPanel(tk.Frame):
             self.engine.root / "credentials.json",
             **options,
         )
-        self.sessdata_var.set(cookies["SESSDATA"])
-        self.jct_var.set(cookies["bili_jct"])
-        self.verified_pair = (cookies["SESSDATA"], cookies["bili_jct"])
-        self.verified_at = time.monotonic()
         self.set_auth_status(f"扫码登录成功：{account}，已保存。", "#059669")
         apply_saved_settings(self)
-
-    def do_verify_login(self, on_success=None):
-        if getattr(self, "verifying", False):
-            return
-        s = self.sessdata_var.get().strip()
-        j = self.jct_var.get().strip()
-        if not s or not j:
-            self.set_auth_status("⚠️ 请先完整输入 SESSDATA 与 bili_jct 再进行验证", "#d97706")
-            return
-        self.btn_verify.configure(state="disabled")
-        self.verifying = True
-        self.verified_pair = None
-        self.set_auth_status("⏳ 正在请求 B 站认证接口，验证凭证有效性…", TEXT_MUTED)
-
-        def check_thread():
-            try:
-                ok, msg = self.engine.application.validate_credentials(s, j)
-            except Exception as exc:
-                # UI boundary: always release the busy state without exposing request data.
-                ok, msg = False, f"登录验证异常（{type(exc).__name__}），请重试"
-
-            def on_res():
-                if (
-                    self.winfo_exists()
-                    and hasattr(self, "btn_verify")
-                    and self.btn_verify.winfo_exists()
-                ):
-                    self.btn_verify.configure(state="normal")
-                    self.verifying = False
-                    if (self.sessdata_var.get().strip(), self.jct_var.get().strip()) != (s, j):
-                        self.set_auth_status(
-                            "登录信息已修改，本次验证结果已忽略，请重新验证", TEXT_MUTED
-                        )
-                        return
-                    if ok:
-                        self.verified_pair = (s, j)
-                        self.verified_at = time.monotonic()
-                        self.set_auth_status(f"🟢 验证通过：{msg}。点击保存后才会应用。", "#059669")
-                        if on_success:
-                            on_success()
-                    else:
-                        self.set_auth_status(
-                            f"🔴 验证失败：{msg}（请确认 Cookie 是否过期或复制完整）", "#dc2626"
-                        )
-
-            self.engine.dispatcher.post(on_res)
-
-        self.engine.dispatcher.submit(check_thread)
 
     def _scroll_to_auth(self):
         self.update_idletasks()
         self.canvas.yview_moveto(1.0)
-        if hasattr(self, "e_sess"):
-            self.e_sess.focus_set()
-            self.e_sess.selection_range(0, "end")
         if hasattr(self, "card_auth"):
             self.card_auth.configure(highlightbackground=ACCENT_BLUE, highlightthickness=2)
             self.after(
@@ -238,21 +177,6 @@ class SettingsPanel(tk.Frame):
                 "notify_on_live": self.var_notify.get(),
                 "check_minutes": interval,
             }
-        new_sess = self.sessdata_var.get().strip() if account else ""
-        new_jct = self.jct_var.get().strip() if account else ""
-        if bool(new_sess) != bool(new_jct):
-            messagebox.showwarning(
-                "凭证不完整",
-                "SESSDATA 与 bili_jct 必须同时填写！\n若需清空凭证，请将两项均留空。",
-                parent=self,
-            )
-            return
-        if new_sess and (
-            self.verified_pair != (new_sess, new_jct)
-            or time.monotonic() - getattr(self, "verified_at", 0) > 120
-        ):
-            self.do_verify_login(on_success=self.do_save)
-            return
         def change(settings):
             settings = {**settings, **changes}
             settings.pop("danmaku", None)
@@ -260,8 +184,8 @@ class SettingsPanel(tk.Frame):
             return settings
 
         try:
-            if account:
-                save_login(new_sess, new_jct, self.engine.root / "credentials.json")
+            if automation and hasattr(self, "notification_panel"):
+                self.notification_panel.save_values()
             if changes:
                 update_json(self.engine.root / "settings.json", change, {})
         except (OSError, ValueError, RuntimeError):

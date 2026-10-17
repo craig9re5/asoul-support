@@ -1,5 +1,4 @@
 import tkinter as tk
-import webbrowser
 from .widgets import *
 from .windows import is_autostart_enabled
 
@@ -96,35 +95,17 @@ def build_system(self, container, config, p):
 
 
 def build_auth(self, container, cookies, p, focus_auth):
+    """QR-only login: credentials are never typed or revealed in the UI."""
     tk.Label(
-        container, text="B 站登录凭证", font=(FONT_FAMILY, 10, "bold"), bg=BG_WINDOW, fg=TEXT_MAIN
+        container, text="B 站登录", font=(FONT_FAMILY, 10, "bold"), bg=BG_WINDOW, fg=TEXT_MAIN
     ).pack(anchor="w", pady=(0, p(4)))
     self.card_auth = CardFrame(container, px=p)
     self.card_auth.pack(fill="x", pady=(0, p(14)))
-    self.sessdata_var = tk.StringVar(value=cookies.get("SESSDATA", ""))
-    self.jct_var = tk.StringVar(value=cookies.get("bili_jct", ""))
-    self.verified_pair = None
-    self.sessdata_var.trace_add("write", self.on_credentials_changed)
-    self.jct_var.trace_add("write", self.on_credentials_changed)
-    self.e_sess = credential_entry(self.card_auth, "SESSDATA", self.sessdata_var, p)
-    self.e_jct = credential_entry(self.card_auth, "bili_jct", self.jct_var, p)
-    row_actions = tk.Frame(self.card_auth, bg=BG_CARD)
-    row_actions.pack(fill="x", pady=(p(6), p(2)))
-    self.btn_verify = ModernButton(
-        row_actions, text="🔍 验证登录凭证", command=self.do_verify_login, px=p
-    )
-    self.btn_verify.pack(side="left")
     row_login = tk.Frame(self.card_auth, bg=BG_CARD)
     row_login.pack(fill="x", pady=p(4))
     ModernButton(row_login, text="扫码登录", primary=True, command=self.open_qr_login, px=p).pack(
-        side="left", padx=(0, p(6))
+        side="left"
     )
-    ModernButton(
-        row_actions,
-        text="🌐 打开 B 站主页",
-        command=lambda: webbrowser.open("https://www.bilibili.com"),
-        px=p,
-    ).pack(side="left", padx=(p(6), 0))
     self.status_label = tk.Label(
         self.card_auth,
         text="",
@@ -136,57 +117,8 @@ def build_auth(self, container, cookies, p, focus_auth):
     )
     self.status_label.pack(fill="x", pady=(p(6), 0))
     if cookies.get("SESSDATA") and cookies.get("bili_jct"):
-        self.set_auth_status(
-            "⚪ 本地已保存凭证，点击【🔍 验证登录凭证】可在线检测有效性", TEXT_MUTED
-        )
+        self.set_auth_status("🟢 已保存登录，可重新扫码更换账号", "#059669")
     else:
         self.set_auth_status("🔴 尚未登录，请点击【扫码登录】", "#dc2626")
-    tk.Label(
-        self.card_auth,
-        text="推荐使用 B 站 App 扫码登录；确认后验证并保存到本机。",
-        wraplength=p(480),
-        font=(FONT_FAMILY, 8),
-        bg=BG_CARD,
-        fg=TEXT_MUTED,
-    ).pack(anchor="w", pady=(p(4), 0))
     if focus_auth:
         self.after(120, self._scroll_to_auth)
-
-
-def credential_entry(parent, name, variable, p):
-    row = tk.Frame(parent, bg=BG_CARD)
-    row.pack(fill="x", pady=p(3))
-    tk.Label(
-        row, text=name, width=10, anchor="w", font=(FONT_FAMILY, 9), bg=BG_CARD, fg=TEXT_MUTED
-    ).pack(side="left")
-    entry = tk.Entry(
-        row,
-        textvariable=variable,
-        show="●",
-        font=(FONT_FAMILY, 9),
-        bg=BG_WINDOW,
-        fg=TEXT_MAIN,
-        highlightthickness=1,
-        highlightbackground=BORDER_CARD,
-        bd=0,
-    )
-    entry.pack(side="left", fill="x", expand=True, ipady=p(2), padx=(0, p(6)))
-
-    def toggle_sess():
-        cur = entry.cget("show")
-        entry.configure(show="" if cur else "●")
-        button.configure(text="🔒" if not cur else "👁️")
-
-    button = tk.Button(
-        row,
-        text="👁️",
-        command=toggle_sess,
-        font=(FONT_FAMILY, 8),
-        bg=BG_CARD,
-        fg=TEXT_MUTED,
-        bd=0,
-        relief="flat",
-        cursor="hand2",
-    )
-    button.pack(side="right")
-    return entry
