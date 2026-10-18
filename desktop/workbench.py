@@ -189,7 +189,6 @@ class Workbench:
             self.nav_buttons[page] = button
             if page != "history":
                 button.pack(fill="x", pady=p(2))
-        label(side, "本机运行 · 托盘常驻", size=9, color="#a6bab4", bg=SIDE).pack(side="bottom", anchor="w")
         self.activity_button = self.nav_buttons["history"]
         self.activity_button.pack(side="bottom", fill="x", pady=(0, p(12)))
         self._select_navigation("monitor")

@@ -3,7 +3,7 @@ import tkinter as tk
 
 try:
     import pystray
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageColor, ImageDraw
 except ImportError:
     pystray = None
     Image = ImageDraw = None
@@ -36,12 +36,37 @@ FONT_FAMILY = "Microsoft YaHei UI"
 
 
 def icon_image(color="#63d4b2", size=64):
+    """Rounded tile with a heartbeat pulse: support that keeps the stream alive.
+
+    Drawn at 4x and downscaled so edges stay smooth at 16px tray size.
+    """
     scale = 4
-    image = Image.new("RGBA", (64 * scale, 64 * scale), (0, 0, 0, 0))
+    side = 64 * scale
+    image = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+
+    # Vertical gradient tile (deep teal -> near-black) instead of one flat fill.
+    tile = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    gradient = ImageDraw.Draw(tile)
+    top, bottom = (0x1b, 0x2f, 0x36), (0x0f, 0x1a, 0x1f)
+    for y in range(side):
+        mix = y / (side - 1)
+        fill = tuple(round(top[i] + (bottom[i] - top[i]) * mix) for i in range(3)) + (255,)
+        gradient.line([(0, y), (side, y)], fill=fill)
+    mask = Image.new("L", (side, side), 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        (3 * scale, 3 * scale, 61 * scale, 61 * scale), radius=17 * scale, fill=255)
+    image.paste(tile, (0, 0), mask)
+
+    # Heartbeat trace: flat, spike, spike, flat, drawn as one smooth polyline.
     draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle(tuple(v * scale for v in (3, 3, 61, 61)), radius=17 * scale, fill="#16262d")
-    points = [(x * scale, y * scale) for x, y in [(13, 34), (23, 34), (28, 20), (35, 46), (41, 29), (51, 29)]]
-    draw.line(points, fill=color, width=5 * scale, joint="curve")
+    points = [(11, 32), (20, 32), (25, 20), (30, 45), (36, 25), (40, 32), (53, 32)]
+    base = ImageColor.getrgb(color) if isinstance(color, str) else tuple(color[:3])
+    for width, alpha in ((13, 45), (8, 255)):
+        layer = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+        ImageDraw.Draw(layer).line(
+            [(x * scale, y * scale) for x, y in points],
+            fill=base + (alpha,), width=width * scale // 2, joint="curve")
+        image.alpha_composite(layer)
     return image.resize((size, size), Image.Resampling.LANCZOS)
 
 

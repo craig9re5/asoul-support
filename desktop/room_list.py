@@ -53,17 +53,34 @@ class RoomList(tk.Frame):
         self.canvas.pack(side="left", fill="both", expand=True)
         self.content = tk.Frame(self.canvas, bg=BACKGROUND)
         self.window = self.canvas.create_window(0, 0, window=self.content, anchor="nw")
-        self.content.bind("<Configure>", lambda _: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.content.bind("<Configure>", lambda _: self._sync_scroll())
         self.canvas.bind("<Configure>", self._resize)
         self.bind("<Return>", lambda _: ui.on_open_room())
         self.bind("<Delete>", lambda _: ui.on_remove_member())
         self.bind("<Up>", lambda _: self._step(-1))
         self.bind("<Down>", lambda _: self._step(1))
 
+    def _sync_scroll(self):
+        """Size the scroll region from the rows, not from a stale bbox.
+
+        Removing rows shrinks content without a Configure on the inner frame,
+        which used to leave the old, taller scroll region in place and let the
+        list scroll past its last row into blank space.
+        """
+        width = self.canvas.winfo_width()
+        height = sum(item["frame"].winfo_height() for item in self.items.values())
+        if width <= 1 or height <= 0:
+            self.canvas.configure(scrollregion=(0, 0, max(1, width), 1))
+            return
+        self.canvas.configure(scrollregion=(0, 0, width, height))
+        if height <= self.canvas.winfo_height():
+            self.canvas.yview_moveto(0)
+
     def _resize(self, event):
         self.canvas.itemconfigure(self.window, width=event.width)
         for item in self.items.values():
             self._fit_headline(item, event.width)
+        self._sync_scroll()
 
     def _fit_headline(self, item, width):
         available = max(1, width - self.ui.px(66))
@@ -209,6 +226,7 @@ class RoomList(tk.Frame):
             widget.bind("<Button-3>", lambda event, key=iid: self._context(key, event))
             widget.bind("<MouseWheel>", self._wheel)
         self.item(iid, values=values, tags=tags)
+        self._sync_scroll()
         return iid
 
     def _paint(self, iid):
@@ -263,6 +281,7 @@ class RoomList(tk.Frame):
         self.order.remove(iid)
         if self.selected == iid:
             self.selected = ""
+        self._sync_scroll()
 
     def move(self, iid, _parent, index):
         if self.order[index] == iid:
@@ -272,3 +291,4 @@ class RoomList(tk.Frame):
         for key in self.order:
             self.items[key]["frame"].pack_forget()
             self.items[key]["frame"].pack(fill="x")
+        self._sync_scroll()
