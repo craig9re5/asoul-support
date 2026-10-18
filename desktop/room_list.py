@@ -9,6 +9,7 @@ from .widgets import FONT_FAMILY, SlimScrollbar
 BACKGROUND = "#ffffff"
 SELECTED = "#edf3f1"
 LIVE = "#f0fdf4"
+LIVE_DOT = "#22c55e"
 INK = "#253638"
 MUTED = "#657477"
 PLACEHOLDER = "#94a3b8"
@@ -66,6 +67,8 @@ class RoomList(tk.Frame):
 
     def _fit_headline(self, item, width):
         available = max(1, width - self.ui.px(66))
+        dot_width = self.ui.px(13) if item["live_dot"].cget("text") else 0
+        available = max(1, available - dot_width)
         name_font = font_for(item["name"])
         name = self._elide(item.get("name_text", ""), name_font, int(available * 0.48))
         item["name"].configure(text=name)
@@ -168,11 +171,17 @@ class RoomList(tk.Frame):
         headline.grid(row=0, column=1, sticky="ew")
         headline.columnconfigure(1, weight=1)
         labels = {}
-        for column, (name, size, color) in enumerate((("name", 10, INK), ("title", 9, MUTED))):
+        # A single dot carries the live state; the name stays plain text.
+        labels["live_dot"] = tk.Label(headline, bg=BACKGROUND, fg=LIVE_DOT, text="",
+                                      font=(FONT_FAMILY, 10), padx=0, pady=0)
+        labels["live_dot"].grid(row=0, column=0, sticky="w", padx=(0, p(5)))
+        for column, (name, size, color) in enumerate((("name", 10, INK), ("title", 9, MUTED)), start=1):
             label = tk.Label(headline, bg=BACKGROUND, fg=color, anchor="e" if name == "title" else "w", justify="left", padx=0, pady=0,
                              font=(FONT_FAMILY, size, "bold" if name == "name" else "normal"))
-            label.grid(row=0, column=column, sticky="ew", padx=(0, p(8) if column == 0 else 0))
+            label.grid(row=0, column=column, sticky="ew", padx=(0, p(8) if name == "name" else 0))
             labels[name] = label
+        headline.columnconfigure(1, weight=0)
+        headline.columnconfigure(2, weight=1)
         metadata = tk.Frame(frame, bg=BACKGROUND)
         metadata.grid(row=1, column=1, sticky="ew")
         for column, (name, color) in enumerate((("phase", MUTED), ("medal", INK), ("gain", "#2d6763"))):
@@ -211,7 +220,7 @@ class RoomList(tk.Frame):
         else:
             bg = BACKGROUND
         for key in ("frame", "name", "title", "headline", "metadata", "progress",
-                    "phase", "medal", "gain", "tasks", "heartbeat"):
+                    "phase", "medal", "gain", "tasks", "heartbeat", "live_dot"):
             item[key].configure(bg=bg)
         if item.get("photo"):
             item["avatar"].configure(bg=bg)
@@ -227,13 +236,15 @@ class RoomList(tk.Frame):
         item["title_text"] = values[1]
         item["metadata_text"] = {"phase": values[4], "medal": values[2].split("\n")[0],
                                  "gain": gain_label(row) if row.get("medal_name") else ""}
-        item["tasks_text"] = values[3]
+        item["live_dot"].configure(text="●" if row.get("live_status") == 1 else "")
+        item["tasks_text"] = "" if values[3] == "—" else values[3]
         item["heartbeat_text"] = "" if values[5] == "—" else values[5]
         self._fit_headline(item, self.canvas.winfo_width())
         item["phase"].configure(fg="#a65c00" if row.get("watch_warning") or row.get("connection_warning") else MUTED)
         if "placeholder" in item.get("tags", ()):
             for key in ("name", "title", "phase", "medal", "gain", "tasks", "heartbeat"):
                 item[key].configure(fg=PLACEHOLDER)
+            item["live_dot"].configure(fg=PLACEHOLDER)
         if not item.get("photo"):
             item["avatar"].configure(text=row.get("name", "?")[:1])
         self._paint(iid)

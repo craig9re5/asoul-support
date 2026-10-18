@@ -532,7 +532,7 @@ class TrayUI:
                     else "—"
                 )
                 is_live = row.get("live_status") == 1
-                name_str = f"[直播中] {row['name']}" if is_live else row["name"]
+                name_str = row["name"]
                 t = row.get("title", "")
                 a = row.get("area_name", "")
                 if is_live:
@@ -553,11 +553,15 @@ class TrayUI:
                 else:
                     medal_str = "—"
                 tasks = row.get("tasks", [])
-                tasks_str = (
-                    "进度待更新"
-                    if row.get("tasks_stale")
-                    else format_task_mini_badge(tasks, is_lighted, has_medal=bool(medal_name))
-                )
+                # Badges only mean something while watching; an offline room shows no progress.
+                if is_live:
+                    tasks_str = (
+                        "进度待更新"
+                        if row.get("tasks_stale")
+                        else format_task_mini_badge(tasks, is_lighted, has_medal=bool(medal_name))
+                    )
+                else:
+                    tasks_str = "—"
                 phase_str = phase_label(row)
                 if row.get("task_error") and row.get("active"):
                     phase_str += " · 任务待确认"

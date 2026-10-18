@@ -89,9 +89,9 @@ class Workbench:
         self.detail_title = label(self.detail_frame, "选择主播查看详情", size=12, bold=True)
         self.detail_title.pack(fill="x")
         self.detail_live_title = label(self.detail_frame, "", size=9, color=MUTED)
-        self.detail_live_title.pack(fill="x", pady=(p(4),p(12)))
+        self.detail_live_title.pack(fill="x", pady=(p(3),p(10)))
         self.connection_card = tk.Frame(self.detail_frame, bg="#f0f6f3", padx=p(10), pady=p(10))
-        self.connection_card.pack(fill="x", pady=(0, p(12)))
+        self.connection_card.pack(fill="x", pady=(0, p(10)))
         status_row = tk.Frame(self.connection_card, bg="#f0f6f3")
         status_row.pack(fill="x")
         self.reconnect_button = ModernButton(status_row, text="⟳ 重连", command=ui.on_reconnect_room,
@@ -105,7 +105,7 @@ class Workbench:
         self.detail_warning = label(self.connection_card, "", size=9, color="#875818", bg="#fff3df")
         self.detail_warning.configure(padx=p(8), pady=p(7))
         summary = tk.Frame(self.detail_frame, bg="#f7f9f8", padx=p(12), pady=p(12))
-        summary.pack(fill="x", pady=(0, p(16)))
+        summary.pack(fill="x", pady=(0, p(14)))
         self.detail_gain = label(summary, "今日亲密度：待更新", size=14, color=ACCENT, bg="#f7f9f8", bold=True)
         self.detail_gain.pack(fill="x")
         self.detail_medal = label(summary, "粉丝牌信息待更新", size=9, bg="#f7f9f8")
@@ -122,7 +122,7 @@ class Workbench:
         label(task_heading, "服务端进度", size=8, color=MUTED).pack(side="right")
         self.task_labels = []
         for title in ("弹幕", "点赞", "观看", "灯牌"):
-            row = tk.Frame(self.detail_frame, bg="white", pady=p(8))
+            row = tk.Frame(self.detail_frame, bg="white", pady=p(5))
             row.pack(fill="x")
             label(row, title, size=10).pack(side="left")
             value = label(row, "待更新", size=9, color=MUTED)
@@ -131,7 +131,7 @@ class Workbench:
             tk.Frame(self.detail_frame, bg="#edf1ef", height=1).pack(fill="x")
         note = label(self.detail_frame, "亲密度以服务端实际结算为准", size=8, color=MUTED)
         note.configure(wraplength=p(285))
-        note.pack(fill="x", pady=(p(10), 0))
+        note.pack(fill="x", pady=(p(8), 0))
         action = self.detail_actions
         action_row = tk.Frame(action, bg="white")
         action_row.pack(fill="x")
