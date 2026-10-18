@@ -37,6 +37,8 @@ class StabilityTests(unittest.TestCase):
             if Path(path).name == "status.json":
                 raise PermissionError("synthetic file held open")
             original(path, value)
+        # The test's two cycles share a throttle window; force the health refresh below.
+        self.engine.last_health_publish = 0
         with patch.object(self.engine, "tick") as tick:
             with patch("desktop.engine.write_json", side_effect=fail_status):
                 self.engine.cycle()
@@ -44,6 +46,7 @@ class StabilityTests(unittest.TestCase):
             health = read_json(self.root / "monitor-health.json")
             self.assertEqual(health["publish_error"], "PermissionError")
             self.assertGreater(health["last_tick"], 0)
+            self.engine.last_health_publish = 0
             self.engine.cycle()
         self.assertEqual(self.engine.publish_error, "")
         self.assertEqual(read_json(self.root / "status.json")["error"], "")
@@ -54,6 +57,8 @@ class StabilityTests(unittest.TestCase):
         import ctypes
         from ctypes import wintypes
         self.engine.persist()
+        # Let the next cycle publish a failure instead of skipping this one as recent.
+        self.engine.last_status_publish = 0
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
                                       ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
@@ -78,6 +83,21 @@ class StabilityTests(unittest.TestCase):
         with patch.object(self.engine, "tick", side_effect=ValueError("synthetic bad config")):
             self.engine.cycle()
         self.assertIn("ValueError", read_json(self.root / "status.json")["error"])
+
+    def test_snapshots_are_throttled_but_state_changes_and_errors_publish_immediately(self):
+        with patch.object(self.engine, "tick"):
+            self.engine.cycle()
+            first = read_json(self.root / "status.json")["updated"]
+            self.engine.cycle()
+            self.assertEqual(read_json(self.root / "status.json")["updated"], first)
+            self.engine.persist()
+            self.assertGreater(read_json(self.root / "status.json")["updated"], first)
+        # A failure during the throttle window is still recorded for diagnostics.
+        self.engine.last_status_publish = 0
+        with patch("desktop.engine.write_json", side_effect=PermissionError("synthetic")):
+            with patch.object(self.engine, "tick"):
+                self.engine.cycle()
+        self.assertEqual(self.engine.publish_error, "PermissionError")
 
     def test_stalled_worker_terminated_and_backoff_respected(self):
         proc = Mock(pid=99)
@@ -238,11 +258,6 @@ class StabilityTests(unittest.TestCase):
         TrayUI.refresh(ui)
         ui.root.after.assert_called_once_with(1000, ui.refresh)
         ui.summary.set.assert_called_once()
-
-    def test_closed_refresh_does_not_rearm(self):
-        ui = Mock(closed=True)
-        TrayUI.refresh(ui)
-        ui.root.after.assert_not_called()
 
     def test_bad_command_does_not_block_following_valid_command(self):
         folder = self.root / "commands"

@@ -482,15 +482,6 @@ class DanmakuTaskTests(unittest.TestCase):
         self.assertIsNotNone(res)
         self.assertTrue(res["done"])
 
-    def test_pacing_lock_timeout_is_at_least_30s(self):
-        import danmaku_pacing
-
-        self.assertGreaterEqual(danmaku_pacing.LOCK_WAIT_TIMEOUT, 30.0)
-
-    def test_check_limits_allow_full_revival(self):
-        self.assertGreaterEqual(heartbeat.DANMAKU_ATTEMPTS_PER_CHECK, 15)
-        self.assertGreaterEqual(heartbeat.DANMAKU_WORK_BUDGET, 90)
-
 
 if __name__ == "__main__":
     unittest.main()

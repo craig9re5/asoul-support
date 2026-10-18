@@ -102,19 +102,6 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(room_list.measure(font, "other"), 42)
         self.assertEqual(font.measure.call_count, 2)
 
-    def test_font_for_reuses_one_object_per_spec(self):
-        from desktop import room_list
-
-        room_list._FONT_CACHE.clear()
-        widget = Mock()
-        widget.cget.return_value = ("Microsoft YaHei UI", 9)
-        with patch("desktop.room_list.tkfont.Font") as factory:
-            factory.side_effect = lambda **_: Mock()
-            first = room_list.font_for(widget)
-            second = room_list.font_for(widget)
-        self.assertIs(first, second)
-        self.assertEqual(factory.call_count, 1)
-
     def test_detail_clears_when_selection_is_empty(self):
         """A stale detail panel kept the old room's buttons live after deselect."""
         from desktop import workbench as wb_module

@@ -14,6 +14,11 @@ from pathlib import Path
 from desktop.storage import load_config, read_json, write_json, read_status
 from desktop.windows import Job
 from asoul_support.runtime import update_json, append_event
+from asoul_support.notifications.service import DailyNotifications
+
+# The GUI reads Engine.snapshot() directly; status.json only serves other processes,
+# and read_status accepts 15 seconds of age. Publishing every tick was pure disk churn.
+STATUS_PUBLISH_SECONDS = 5.0
 
 
 def command(*args):
@@ -27,6 +32,7 @@ class Engine:
     def __init__(self, root, *, job=None):
         self.root = root
         self.application = AppContext(root)
+        self.notifications = DailyNotifications(root)
         self.lock = threading.RLock()
         self.stopping = threading.Event()
         self.job = job if job is not None else Job()
@@ -37,6 +43,7 @@ class Engine:
         self.started_at = time.time()
         self.last_tick = 0
         self.last_status_publish = 0
+        self.last_health_publish = 0
         self.publish_error = ""
         self.state_errors = {}
         self.probe = None
@@ -67,6 +74,7 @@ class Engine:
         self.thread = threading.Thread(target=self.run, name="monitor", daemon=True)
 
     def start(self):
+        self.notifications.start()
         self.thread.start()
 
     def _credentials_signature(self):
@@ -251,12 +259,15 @@ class Engine:
 
     def close(self):
         self.stopping.set()
+        self.notifications.stop()
         with self.lock:
             self.stop_children("exited")
             self.job.close()
             self.persist(exited=True)
         if self.thread.is_alive():
             self.thread.join(timeout=5)
+        # This runs in the control executor, not Tk. Finish any accepted IO before exit.
+        self.notifications.join()
 
     def _read_room_state(self, room):
         try:
@@ -290,6 +301,7 @@ class Engine:
     def persist(self, exited=False):
         write_json(self.root / "status.json", {**self.snapshot(), "exited": exited})
         self.last_status_publish = time.time()
+        self.publish_error = ""
 
     def cycle(self):
         """A publish failure must not disable scheduling or erase its diagnostics."""
@@ -300,26 +312,31 @@ class Engine:
             logging.exception("Monitor cycle failed")
             self.error = f"配置或运行错误：{type(exc).__name__}"
             self.next_check = time.time() + 60
-        try:
-            # Recovery clears the previous publication error only after an actual write.
-            snapshot = self.snapshot()
-            snapshot["error"] = self.error
-            write_json(self.root / "status.json", {**snapshot, "exited": False})
-            self.last_status_publish = time.time()
-            self.publish_error = ""
-        except Exception as exc:
-            error = type(exc).__name__
-            if error != self.publish_error:
-                logging.exception("Status publication failed")
-            self.publish_error = error
-        try:
-            write_json(self.root / "monitor-health.json", {
-                "pid": os.getpid(), "started": self.started_at, "updated": time.time(),
-                "last_tick": self.last_tick, "last_status_publish": self.last_status_publish,
-                "publish_error": self.publish_error,
-            })
-        except OSError:
-            logging.warning("Cannot publish monitor health")
+        now = time.time()
+        # Retry a failed publication on the next cycle instead of waiting for a full interval.
+        if self.publish_error or now - self.last_status_publish >= STATUS_PUBLISH_SECONDS:
+            try:
+                # Recovery clears the previous publication error only after an actual write.
+                snapshot = self.snapshot()
+                snapshot["error"] = self.error
+                write_json(self.root / "status.json", {**snapshot, "exited": False})
+                self.last_status_publish = time.time()
+                self.publish_error = ""
+            except Exception as exc:
+                error = type(exc).__name__
+                if error != self.publish_error:
+                    logging.exception("Status publication failed")
+                self.publish_error = error
+        if now - self.last_health_publish >= STATUS_PUBLISH_SECONDS:
+            try:
+                write_json(self.root / "monitor-health.json", {
+                    "pid": os.getpid(), "started": self.started_at, "updated": time.time(),
+                    "last_tick": self.last_tick, "last_status_publish": self.last_status_publish,
+                    "publish_error": self.publish_error,
+                })
+                self.last_health_publish = time.time()
+            except OSError:
+                logging.warning("Cannot publish monitor health")
 
     def _watch_workers(self, now):
         clock = time.monotonic()
