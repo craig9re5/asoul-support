@@ -13,7 +13,7 @@ PATTERNS = {
     "github token": re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b|\bgithub_pat_[A-Za-z0-9_]{40,}\b"),
     "private key": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     "session literal": re.compile(
-        r"(?:SESSDATA|bili_jct|csrf(?:_token)?|refresh_token|access_token|qrcode_key|"
+        r"(?:SESSDATA|bili_jct|csrf(?:_token)?|refresh_token|access_token|pushplus_token|qrcode_key|"
         r"DedeUserID__ckMd5|buvid[34]|sid)[\"']?\s*[:=]\s*[\"']?"
         r"([A-Za-z0-9%_./+\-]{28,})", re.I
     ),
@@ -24,6 +24,8 @@ PATTERNS = {
 }
 FORBIDDEN_NAMES = {
     "credentials.json",
+    "pushplus.credentials.json",
+    "notifications.sqlite3",
     ".cookies.json",
     "activity.jsonl",
     "status.json",
@@ -36,7 +38,7 @@ FORBIDDEN_NAMES = {
 FORBIDDEN_PARTS = {".asoul-support-data", "logs", "captures", "private-history"}
 FORBIDDEN_SUFFIXES = {".har", ".pem", ".pfx", ".exe", ".log", ".bundle"}
 PRIVATE_KEYS = re.compile(
-    r"^(sessdata|bili_jct|csrf(?:_token)?|refresh_token|access_token|qrcode_key|"
+    r"^(sessdata|bili_jct|csrf(?:_token)?|refresh_token|access_token|pushplus_token|qrcode_key|"
     r"DedeUserID(?:__ckMd5)?|buvid\w*|sid)$", re.I
 )
 
@@ -70,6 +72,7 @@ def check_path(relative, label, findings):
     path = Path(relative)
     if (
         path.name in FORBIDDEN_NAMES
+        or path.name.startswith("notifications.sqlite3")
         or path.suffix.lower() in FORBIDDEN_SUFFIXES
         or any(part in FORBIDDEN_PARTS for part in path.parts)
     ):
@@ -106,7 +109,8 @@ def private_values_from_file(path):
 def history_blobs(root):
     """Batch object reads avoid starting a Git process for every historical blob."""
     objects = {}
-    for row in git("rev-list", "--objects", "--all", root=root).splitlines():
+    # Local branches only: origin/* is upstream history we neither own nor publish.
+    for row in git("rev-list", "--objects", "--branches", root=root).splitlines():
         parts = row.split(" ", 1)
         if len(parts) == 2:
             objects.setdefault(parts[0], parts[1])
@@ -146,11 +150,11 @@ def scan(history=True, root=ROOT, private_values=()):
             label = f"history:{oid[:10]}:{relative}"
             check_path(relative, label, findings)
             scan_blob(data, label, findings, private_values)
-        metadata = git("log", "--all", "--format=%H%n%an <%ae>%n%cn <%ce>%n%B", root=root)
+        metadata = git("log", "--branches", "--format=%H%n%an <%ae>%n%cn <%ce>%n%B", root=root)
         scan_blob(metadata.encode(), "history:commit-metadata", findings, private_values)
         if re.search(r"<[\w.+-]+@(?!users\.noreply\.github\.com)[\w.-]+>", metadata):
             findings.append({"file": "history:commit-metadata", "kind": "personal author email"})
-        for relative in set(git("log", "--all", "--format=", "--name-only", "-z", root=root).split("\0")):
+        for relative in set(git("log", "--branches", "--format=", "--name-only", "-z", root=root).split("\0")):
             relative = relative.strip("\n")
             if relative:
                 check_path(relative, f"history:path:{relative}", findings)
