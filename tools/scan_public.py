@@ -110,7 +110,7 @@ def history_blobs(root):
     """Batch object reads avoid starting a Git process for every historical blob."""
     objects = {}
     # Local branches only: origin/* is upstream history we neither own nor publish.
-    for row in git("rev-list", "--objects", "--branches", root=root).splitlines():
+    for row in git("rev-list", "--objects", "--branches", "--not", "--remotes", root=root).splitlines():
         parts = row.split(" ", 1)
         if len(parts) == 2:
             objects.setdefault(parts[0], parts[1])
@@ -150,11 +150,11 @@ def scan(history=True, root=ROOT, private_values=()):
             label = f"history:{oid[:10]}:{relative}"
             check_path(relative, label, findings)
             scan_blob(data, label, findings, private_values)
-        metadata = git("log", "--branches", "--format=%H%n%an <%ae>%n%cn <%ce>%n%B", root=root)
+        metadata = git("log", "--branches", "--not", "--remotes", "--format=%H%n%an <%ae>%n%cn <%ce>%n%B", root=root)
         scan_blob(metadata.encode(), "history:commit-metadata", findings, private_values)
         if re.search(r"<[\w.+-]+@(?!users\.noreply\.github\.com)[\w.-]+>", metadata):
             findings.append({"file": "history:commit-metadata", "kind": "personal author email"})
-        for relative in set(git("log", "--branches", "--format=", "--name-only", "-z", root=root).split("\0")):
+        for relative in set(git("log", "--branches", "--not", "--remotes", "--format=", "--name-only", "-z", root=root).split("\0")):
             relative = relative.strip("\n")
             if relative:
                 check_path(relative, f"history:path:{relative}", findings)
