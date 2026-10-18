@@ -127,11 +127,12 @@ def project_row(engine, member, state, now):
     reconnect_allowed = bool((active or live_status == 1 or connection_warning)
                              and not engine.paused and not safety.get("blocked") and not recovering
                              and now >= recovery.get("cooldown_until", 0))
-    watch, watch_warning, task_entry, tasks_stale = watch_observation(
+    watch, watch_warning, watch_note, task_entry, tasks_stale = watch_observation(
         state, task_entry, active, tasks_stale, now
     )
     if safety.get("blocked") or engine.paused or heartbeat_stale:
         watch_warning = ""
+        watch_note = ""
     today_value = medal.get("today_intimacy")
     checked = engine.account_checked_at
     medal_day = (datetime.fromtimestamp(checked, timezone(timedelta(hours=8))).date().isoformat()
@@ -158,6 +159,7 @@ def project_row(engine, member, state, now):
         "session_id": state.get("session_id"),
         "task_error": task_error,
         "watch_warning": watch_warning,
+        "watch_note": watch_note,
         "watch_progress": watch,
         "started": state.get("started"),
         "beats": state.get("beats", 0),
@@ -186,7 +188,13 @@ def watch_observation(state, task_entry, active, tasks_stale, now):
     """Project verified task rows without making an old medal counter look fresh."""
     watch = state.get("watch_progress", {}) if active else {}
     if watch.get("day") != task_day():
-        return {}, "", task_entry, tasks_stale
+        return {}, "", "", task_entry, tasks_stale
+    note = ""
+    minutes = int(watch.get("unchanged_minutes") or 0)
+    if watch.get("rotation") and minutes >= 30:
+        # The account is being credited elsewhere, so this room is simply queued.
+        note = ("收益轮转中：多个直播间同时挂机时，账号收益按房间依次结算，"
+                f"本房间已等待约 {minutes} 分钟，心跳正常。")
     warning = ""
     ttl = CHECK_INTERVAL * 2 + 180
     if 0 <= now - number(watch.get("checked_at")) <= ttl:
@@ -203,7 +211,7 @@ def watch_observation(state, task_entry, active, tasks_stale, now):
     if (not tasks_stale and progress and (progress.get("done")
             or progress.get("current", -1) > (watch.get("progress") or {}).get("current", -1))):
         warning = ""
-    return watch, warning, task_entry, tasks_stale
+    return watch, warning, note, task_entry, tasks_stale
 
 
 def elapsed_label(live_status, live_time_val, now):

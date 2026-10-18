@@ -113,8 +113,8 @@ def main():
                 ui.tray.notify.reset_mock()
                 ui.refresh()
                 ui.refresh()
-                assert "看播收益待核验" in ui.summary.get()
-                assert "核对看播收益" in ui.footer.get()
+                assert "观看收益待核验" in ui.summary.get()
+                assert "核对观看收益" in ui.footer.get()
                 assert ui.workbench.detail_warning.winfo_manager() == "pack"
                 assert "未增长" in ui.workbench.detail_warning.cget("text")
                 assert ui.tree.items["2"]["phase"].cget("fg") == "#a65c00"

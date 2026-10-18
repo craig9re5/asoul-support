@@ -313,7 +313,8 @@ class Workbench:
         import time
         last = time.strftime("%H:%M:%S", time.localtime(heartbeat)) if heartbeat else "暂无成功心跳"
         self.detail_heartbeat.configure(text=f"最近心跳：{last}" + ("\n"+row["task_error"] if row.get("task_error") else ""))
-        warning = "\n".join(message for message in (row.get("connection_warning"), row.get("watch_warning")) if message)
+        warning = "\n".join(message for message in (row.get("connection_warning"), row.get("watch_warning"),
+                                                    row.get("watch_note")) if message)
         operation = self.ui.room_actions.get(row.get("room"), {})
         operation_message = operation.get("message", "")
         if operation.get("pending"):

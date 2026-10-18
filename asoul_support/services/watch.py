@@ -4,6 +4,7 @@ import uuid
 from typing import Optional, Dict
 from ..policies import *
 from .. import safety
+from .credit_clock import CreditClock
 from .watch_progress import WatchProgressMonitor
 
 
@@ -76,7 +77,10 @@ def watch_room(
             "stopped_reason": "session",
         }
     uuid_str = str(uuid.uuid4())
-    progress_monitor = WatchProgressMonitor(room_id, up_id, name, sessdata, bili_jct, _gateway)
+    root = _gateway._runtime_path("_TASK_STATE_DIR").parent.parent
+    credit_clock = CreditClock(root, safety.identity(sessdata, root))
+    progress_monitor = WatchProgressMonitor(room_id, up_id, name, sessdata, bili_jct, _gateway,
+                                            clock=credit_clock)
     progress_monitor.check(force=True)
     e_data = _gateway.x25kn_enter_room(
         room_id, parent_area_id, area_id, up_id, buvid, uuid_str, sessdata, bili_jct
@@ -162,7 +166,9 @@ def _watch_until_offline(
     _gateway._notify(f"🔴 **{name}** 开播啦！{title_str}\n开始时间：{start_clock}，自动挂机中...")
     if send_danmaku or send_live_likes:
         print("    💬 检查已启用的每日任务...", file=sys.stderr)
-        _check_tasks(task_runner, room_id, _gateway)
+        # Nothing is due yet, so this pass gets the full work budget.
+        _run_tasks(task_runner, room_id, _gateway,
+                   like_batches=1 if send_live_likes else None)
     next_danmaku_check = time.monotonic() + _gateway.DANMAKU_RECHECK_INTERVAL
     print(f"    ⏱  开始挂机直到下播（每 {interval}s 心跳一次）...", file=sys.stderr)
     beats_ok = 0
@@ -237,11 +243,13 @@ def _watch_until_offline(
             }
         if result and progress_monitor:
             progress_monitor.maybe_recover(chain)
-        if (send_danmaku or send_live_likes) and (
-            _gateway.task_day() != task_runner.day or time.monotonic() >= next_danmaku_check
-        ):
+        if (send_danmaku or send_live_likes) and _tasks_due(task_runner, next_danmaku_check, _gateway):
+            # Keep the slot open: a task that cannot finish inside the heartbeat
+            # window is retried on the next pass rather than delaying the beat.
             next_danmaku_check = time.monotonic() + _gateway.DANMAKU_RECHECK_INTERVAL
-            _check_tasks(task_runner, room_id, _gateway)
+            if _task_window_open(chain):
+                _run_due_tasks(task_runner, room_id, _gateway, chain,
+                               like_batches=1 if send_live_likes else None)
 
 
 def _watch_duration(
@@ -262,7 +270,10 @@ def _watch_duration(
     started = time.monotonic()
     deadline = started + max(0, duration_min) * 60
     if send_danmaku or send_live_likes:
-        _check_tasks(task_runner, room_id, _gateway)
+        # Before the first beat nothing is due, so the work budget is free.
+        _run_tasks(task_runner, room_id, _gateway,
+                   deadline=_task_deadline(chain, _gateway.DANMAKU_WORK_BUDGET, deadline),
+                   like_batches=1 if send_live_likes else None)
     next_check = time.monotonic() + _gateway.DANMAKU_RECHECK_INTERVAL
     print(
         f"    ⏱  开始挂机 {duration_min} 分钟（当前服务端间隔 {chain.heartbeat_interval}s）...",
@@ -291,10 +302,12 @@ def _watch_duration(
         if (
             (send_danmaku or send_live_likes)
             and time.monotonic() < deadline
-            and (_gateway.task_day() != task_runner.day or time.monotonic() >= next_check)
+            and _tasks_due(task_runner, next_check, _gateway)
         ):
-            _check_tasks(task_runner, room_id, _gateway)
             next_check = time.monotonic() + _gateway.DANMAKU_RECHECK_INTERVAL
+            if _task_window_open(chain):
+                _run_due_tasks(task_runner, room_id, _gateway, chain, limit=deadline,
+                               like_batches=1 if send_live_likes else None)
     actual_minutes = int((time.monotonic() - started) / 60)
     hold = safety.status(sessdata)
     if progress_monitor and not hold["blocked"]:
@@ -349,7 +362,20 @@ class HeartbeatChain:
             self.heartbeat_interval = self.gateway.HEARTBEAT_INTERVAL
         self.protocol_seq = 0
         self.last_response_at = time.monotonic()
+        self.day = self._current_day()
         print(f"    📡 X25Kn E 已通过，rule={self.secret_rule}", file=sys.stderr)
+
+    def _current_day(self):
+        try:
+            day = self.gateway.task_day()
+        except (OSError, ValueError, RuntimeError):
+            return None
+        return day if isinstance(day, str) else None
+
+    def _crossed_day(self):
+        """The server retires a day's E chain; sending X across midnight is rejected."""
+        day = self._current_day()
+        return bool(day and self.day and day != self.day)
 
     def restart(self) -> bool:
         """重新发送 E，更新密钥、时间戳和序号；保留登录和设备会话。"""
@@ -376,12 +402,17 @@ class HeartbeatChain:
         self.secret_key, self.secret_rule, self.ets = secret_key, secret_rule, ets
         self.heartbeat_interval = heartbeat_interval
         self.protocol_seq = 0
+        self.day = self._current_day()
         print("    🔄 已重建 X25Kn 心跳链", file=sys.stderr)
         return True
 
     def beat(self):
         """按服务端时间窗口发一次 X，并递推下一轮协议状态。"""
         self.gateway._wait_for_heartbeat_window(self.last_response_at, self.heartbeat_interval)
+        # Check after the wait so a sleep that ends past midnight still re-enters.
+        if self._crossed_day():
+            # Re-enter instead of spending the day's first beat on a rejection.
+            self.restart()
         next_seq = self.protocol_seq + 1
         result = self.gateway.x25kn_heartbeat(
             self.room_id,
@@ -421,10 +452,28 @@ class HeartbeatChain:
         return result
 
 
-def _check_tasks(task_runner, room_id, _gateway):
+def _beat_due_at(chain):
+    return chain.last_response_at + chain.heartbeat_interval
+
+
+def _task_deadline(chain, work_budget, limit=None):
+    """Leave room to send the next heartbeat before the server expects it."""
+    now = time.monotonic()
+    budget = max(0.0, min(work_budget, _beat_due_at(chain) - HEARTBEAT_TASK_MARGIN - now))
+    deadline = now + budget
+    return deadline if limit is None else min(deadline, limit)
+
+
+def _task_window_open(chain, minimum=HEARTBEAT_TASK_MARGIN):
+    """Skip optional work when the beat that is already due cannot wait."""
+    return _beat_due_at(chain) - time.monotonic() >= minimum
+
+
+def _run_tasks(task_runner, room_id, _gateway, deadline=None, like_batches=None):
+    """Run one task check, optionally bounded and narrowed to a single kind."""
     _gateway._log({"type": "task_check_start", "room_id": room_id})
     try:
-        result = task_runner.check()
+        result = task_runner.check(deadline=deadline, like_batches=like_batches)
         if not result["success"]:
             errors = [result.get("error")] + [
                 (result.get(k) or {}).get("error") for k in ("danmaku", "like")
@@ -434,3 +483,18 @@ def _check_tasks(task_runner, room_id, _gateway):
         _gateway._log({"type": "task_check_error", "room_id": room_id, "error": type(exc).__name__})
     finally:
         _gateway._log({"type": "task_check_end", "room_id": room_id})
+
+
+def _check_tasks(task_runner, room_id, _gateway):
+    _run_tasks(task_runner, room_id, _gateway)
+
+
+def _tasks_due(task_runner, next_check, _gateway):
+    return _gateway.task_day() != task_runner.day or time.monotonic() >= next_check
+
+
+def _run_due_tasks(task_runner, room_id, _gateway, chain, *, limit=None, like_batches=None):
+    """Daily tasks stay bounded by the next heartbeat and by the session deadline."""
+    _run_tasks(task_runner, room_id, _gateway,
+               deadline=_task_deadline(chain, _gateway.DANMAKU_WORK_BUDGET, limit),
+               like_batches=like_batches)

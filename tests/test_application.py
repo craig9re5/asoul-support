@@ -37,7 +37,7 @@ class ApplicationTests(unittest.TestCase):
 
         chain.beat = beat
         task = SimpleNamespace(check=Mock(return_value={"success": True}), day="day")
-        gateway = Mock(DANMAKU_RECHECK_INTERVAL=600)
+        gateway = Mock(DANMAKU_RECHECK_INTERVAL=600, DANMAKU_WORK_BUDGET=90)
         gateway.task_day.return_value = "day"
         with patch("asoul_support.services.watch.time.monotonic", side_effect=lambda: clock[0]):
             result = _watch_duration(

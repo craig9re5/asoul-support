@@ -69,7 +69,12 @@ class DailyTaskRunner:
         self.day = None
         self.danmaku_done = self.like_done = False
 
-    def check(self):
+    def check(self, *, deadline=None, like_batches=None):
+        """Run due tasks; a deadline bounds work so a heartbeat can still be sent.
+
+        Unlike the lock timeout, a deadline never turns into a failed check: the
+        unfinished task is simply left for the next pass.
+        """
         hold = safety.status(self.sessdata, self.root)
         if hold["blocked"]:
             return {"success": False, "error": hold["reason"], "safety": hold}
@@ -87,7 +92,8 @@ class DailyTaskRunner:
             self.danmaku_done = self.like_done = False
         output = {"danmaku": None, "like": None, "success": True, "day": day}
         with self.gateway.FileLock(
-            self.gateway._runtime_path("_LOCK_DIR") / f"tasks-{self.key}-{self.room}.lock"
+            self.gateway._runtime_path("_LOCK_DIR") / f"tasks-{self.key}-{self.room}.lock",
+            timeout=2 if deadline is not None else 0,
         ) as lock:
             if not lock.acquired:
                 return {**output, "success": False, "error": "该直播间任务正在执行，请稍后检查"}
@@ -103,13 +109,14 @@ class DailyTaskRunner:
             if self.auto_like:
                 self._refresh_like_context(saved, output)
             if (self.auto_revive or self.auto_intimacy) and (not self.danmaku_done):
-                self._check_danmaku(saved, output)
-            if self.auto_like and (not self.like_done):
+                self._check_danmaku(saved, output, deadline)
+            if (self.auto_like and (not self.like_done)
+                    and (deadline is None or time.monotonic() < deadline)):
                 hold = safety.status(self.sessdata, self.root)
                 if hold["blocked"]:
                     output.update(success=False, error=hold["reason"], safety=hold)
                 else:
-                    self._check_like(saved, output)
+                    self._check_like(saved, output, like_batches)
             saved.update(
                 danmaku_done=self.danmaku_done, like_done=self.like_done, updated=time.time()
             )
@@ -124,7 +131,7 @@ class DailyTaskRunner:
         # Login context changes do not restore a UID's daily attempt allowance.
         saved.pop("like_context", None)
 
-    def _check_danmaku(self, saved, output):
+    def _check_danmaku(self, saved, output, deadline=None):
         used = saved.get("attempted", 0)
         allowance = min(
             self.gateway.DANMAKU_ATTEMPTS_PER_CHECK,
@@ -132,6 +139,12 @@ class DailyTaskRunner:
         )
         if self.requested_count is not None:
             allowance = min(allowance, self.requested_count)
+        budget = time.monotonic() + self.gateway.DANMAKU_WORK_BUDGET
+        if deadline is not None:
+            # The watch loop reserves the next heartbeat; never plan past it.
+            budget = min(budget, deadline)
+            if allowance and budget - time.monotonic() < self.gateway.DANMAKU_DELAY:
+                return
         saved["attempted"] = used + allowance
         self.gateway.write_json(self.path, saved)
         try:
@@ -143,7 +156,7 @@ class DailyTaskRunner:
                 auto_revive=self.auto_revive,
                 auto_intimacy=self.auto_intimacy,
                 max_attempts=allowance,
-                deadline=time.monotonic() + self.gateway.DANMAKU_WORK_BUDGET,
+                deadline=budget,
                 **self.batch_options,
             )
             saved["attempted"] = used + result.get("attempted", 0)
@@ -159,19 +172,20 @@ class DailyTaskRunner:
         output["danmaku"] = result
         output["success"] = output["success"] and self.danmaku_done
 
-    def _check_like(self, saved, output):
+    def _check_like(self, saved, output, batches=None):
         if saved.get("like_attempted", 0) >= 3:
             result = {"success": False, "error": "今日点赞尝试已达上限"}
         else:
             saved["like_attempted"] = saved.get("like_attempted", 0) + 1
             self.gateway.write_json(self.path, saved)
+            batches = batches if batches is not None else self.like_batches
             try:
                 result = self.gateway.like_live_room(
                     self.room,
                     self.uid,
                     self.sessdata,
                     self.bili_jct,
-                    **({"batches": self.like_batches} if self.like_batches is not None else {}),
+                    **({"batches": batches} if batches is not None else {}),
                 )
             except Exception as exc:
                 result = {"success": False, "error": f"任务执行失败（{type(exc).__name__}）"}

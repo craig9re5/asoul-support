@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from asoul_support.runtime import task_day
+from asoul_support.services.credit_clock import CreditClock
 from asoul_support.services.watch_progress import ProgressTracker, WatchProgressMonitor, parse_watch_task
 from asoul_support.services.watch import HeartbeatChain, _watch_duration, _watch_until_offline
 from desktop.engine import Engine
@@ -146,6 +147,96 @@ class WatchProgressTests(unittest.TestCase):
                                                  "warning": "奖励尚未确认"}}], [], {}, [])
         self.assertIn("看播任务：0/10（未完成）", result)
         self.assertIn("奖励尚未确认", result)
+
+
+class AccountRotationTests(unittest.TestCase):
+    """One account settles one room per turn; a queued room is not a failure."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.now = 1000.0
+        self.clock = CreditClock(Path(folder.name), "uid-1", clock=lambda: self.now)
+
+    def test_only_a_progress_increase_counts_as_a_credit(self):
+        first = self.clock.observe(1, "day", 4)
+        self.assertIsNone(first["seconds_since_credit"])
+        self.assertEqual(first["pass_overs"], 0)
+        self.now += 60
+        self.assertEqual(self.clock.observe(1, "day", 4)["credits"], 0)
+        self.now += 60
+        credited = self.clock.observe(1, "day", 5)
+        self.assertEqual((credited["credits"], credited["pass_overs"]), (1, 0))
+        self.assertEqual(credited["seconds_since_credit"], 0)
+        self.now += 120
+        self.assertEqual(self.clock.observe(2, "day", 0)["pass_overs"], 0)
+
+    def test_turns_credited_elsewhere_become_pass_overs(self):
+        self.clock.observe(1, "day", 0)
+        self.clock.observe(2, "day", 0)
+        self.now += 600
+        self.clock.observe(2, "day", 1)
+        self.now += 600
+        self.clock.observe(3, "day", 0)
+        self.now += 600
+        self.clock.observe(3, "day", 1)
+        self.now += 600
+        quiet = self.clock.observe(1, "day", 0)
+        self.assertEqual(quiet["credits"], 2)
+        self.assertEqual(quiet["pass_overs"], 2)
+        self.assertEqual(quiet["last_credit_room"], 3)
+
+    def test_cross_day_and_rollback_rebase_without_counting(self):
+        self.clock.observe(1, "day", 7)
+        self.now += 600
+        self.assertEqual(self.clock.observe(1, "day", 3)["credits"], 0)
+        self.now += 600
+        rollback = self.clock.observe(1, "day", 1)
+        self.assertEqual((rollback["credits"], rollback["pass_overs"]), (0, 0))
+        self.now += 600
+        self.assertEqual(self.clock.observe(1, "next-day", 2)["credits"], 0)
+
+    def test_account_view_defers_stall_and_suppresses_reconnect_while_rotating(self):
+        tracker = ProgressTracker()
+        tracker.observe(club(), "day", 0, 0, {"seconds_since_credit": 0, "pass_overs": 0})
+        rotating = tracker.observe(club(), "day", 1800, 1800,
+                                   {"seconds_since_credit": 300, "pass_overs": 1})
+        self.assertEqual(rotating["status"], "tracking")
+        self.assertFalse(rotating["warning"])
+        quiet = tracker.observe(club(), "day", 3700, 3700,
+                                {"seconds_since_credit": 3700, "pass_overs": 4})
+        self.assertEqual(quiet["status"], "stalled")
+        self.assertIn("整个账号同期也没有到账", quiet["warning"])
+        gateway = Mock()
+        gateway.task_day.return_value = "day"
+        gateway.get_fans_club_task_info.return_value = club()
+        gateway._get_single_room_status.return_value = {"live_status": 1}
+        monitor = WatchProgressMonitor(1, 2, "test", "fake", "fake", gateway)
+        monitor.result = {"status": "stalled", "progress": {"current": 0, "limit": 10},
+                          "account": {"seconds_since_credit": 300, "pass_overs": 1}}
+        chain = Mock(heartbeat_interval=60)
+        chain.restart.return_value = True
+        # The forced read keeps the same stalled result; only the account view changes.
+        monitor.check = Mock()
+        monitor.maybe_recover(chain)
+        chain.restart.assert_not_called()
+        monitor.result["account"]["pass_overs"] = 2
+        monitor.maybe_recover(chain)
+        chain.restart.assert_called_once()
+        self.assertEqual(monitor.result["recovery"]["status"], "reconnected")
+
+    def test_desktop_explains_rotation_without_a_warning(self):
+        from desktop.snapshot import watch_observation
+        watch = {"day": task_day(), "status": "tracking", "warning": "", "rotation": True,
+                 "unchanged_minutes": 35, "checked_at": time.time(), "verified_at": time.time(),
+                 "progress": {"current": 3, "limit": 10}}
+        _, warning, note, _, _ = watch_observation(
+            {"watch_progress": watch}, {}, True, False, time.time())
+        self.assertFalse(warning)
+        self.assertIn("收益轮转中", note)
+        watch["unchanged_minutes"] = 5
+        self.assertFalse(watch_observation({"watch_progress": watch}, {}, True, False,
+                                           time.time())[2])
 
 
 class RewardRecoveryTests(unittest.TestCase):
@@ -311,6 +402,81 @@ class RewardRecoveryTests(unittest.TestCase):
         self.monitor.maybe_recover(chain)
         self.assertEqual((chain.secret_key, chain.secret_rule, chain.ets), ("old", [1], 100))
         self.assertEqual(self.monitor.result["recovery"]["status"], "failed")
+
+
+class HeartbeatTimingTests(unittest.TestCase):
+    """Daily tasks must never push the next X past the server's window."""
+
+    def setUp(self):
+        self.addCleanup(patch.stopall)
+        self.clock = 1000.0
+        patch("asoul_support.services.watch.time.monotonic",
+              side_effect=lambda: self.clock).start()
+        self.gateway = Mock(HEARTBEAT_INTERVAL=60, DANMAKU_WORK_BUDGET=90,
+                            DANMAKU_RECHECK_INTERVAL=600, DANMAKU_DELAY=0)
+
+    def chain(self, due_in):
+        chain = Mock(last_response_at=self.clock - (60 - due_in), heartbeat_interval=60)
+        chain.restart.return_value = True
+        return chain
+
+    def test_task_deadline_stops_before_the_next_beat(self):
+        from asoul_support.services.watch import _task_deadline, HEARTBEAT_TASK_MARGIN
+        # 50s until the next beat: only 50 - margin of work fits, not the 90s budget.
+        self.assertEqual(_task_deadline(self.chain(50), 90), self.clock + 50 - HEARTBEAT_TASK_MARGIN)
+        # 120s until the beat: the work budget is the binding limit.
+        self.assertEqual(_task_deadline(self.chain(120), 90), self.clock + 90)
+        # The session deadline still caps everything.
+        self.assertEqual(_task_deadline(self.chain(120), 90, self.clock + 10), self.clock + 10)
+
+    def test_work_is_skipped_when_the_due_beat_cannot_wait(self):
+        from asoul_support.services.watch import _task_window_open
+        self.assertTrue(_task_window_open(self.chain(60)))
+        self.assertFalse(_task_window_open(self.chain(5)))
+
+    def test_watch_loop_bounds_every_check_before_the_next_beat(self):
+        from asoul_support.services.watch import _watch_until_offline, HEARTBEAT_TASK_MARGIN
+        runner = Mock(day="day")
+        runner.check.return_value = {"success": True}
+        chain = self.chain(60)
+        chain.beat.side_effect = lambda: {"ok": True}
+        self.gateway._get_single_room_status.side_effect = [{"live_status": 1}, {"live_status": 0}]
+        _watch_until_offline(chain, runner, "test", 1, "", 60, 0, True, False,
+                             "fake", "fake", self.gateway)
+        deadline = runner.check.call_args.kwargs["deadline"]
+        # The only beat is due in 60s, so work must stop before it is sent.
+        self.assertEqual(deadline, self.clock + 60 - HEARTBEAT_TASK_MARGIN)
+        self.assertIsNone(runner.check.call_args.kwargs["like_batches"])
+
+    def test_like_runs_one_batch_per_pass(self):
+        from asoul_support.services.watch import _watch_until_offline
+        runner = Mock(day="day")
+        runner.check.return_value = {"success": True}
+        chain = self.chain(60)
+        chain.beat.side_effect = lambda: {"ok": True}
+        self.gateway._get_single_room_status.side_effect = [{"live_status": 1}, {"live_status": 0}]
+        _watch_until_offline(chain, runner, "test", 1, "", 60, 0, False, True,
+                             "fake", "fake", self.gateway)
+        self.assertEqual(runner.check.call_args.kwargs["like_batches"], 1)
+
+    def test_cross_day_reenters_before_sending_x(self):
+        self.gateway.task_day.return_value = "day"
+        self.gateway.x25kn_enter_room.return_value = {
+            "secret_key": "new", "secret_rule": [2], "timestamp": 200, "heartbeat_interval": 60}
+        self.gateway.x25kn_heartbeat.return_value = {
+            "secret_key": "new", "secret_rule": [2], "timestamp": 200, "heartbeat_interval": 60}
+        original = {"secret_key": "old", "secret_rule": [1], "timestamp": 100}
+        chain = HeartbeatChain(1, 2, 3, 4, "device", "uuid", "fake", "csrf",
+                               original, 60, self.gateway)
+        self.gateway.task_day.return_value = "next-day"
+        chain.beat()
+        self.gateway.x25kn_enter_room.assert_called_once()
+        self.gateway.x25kn_heartbeat.assert_called_once()
+        self.assertEqual(chain.ets, 200)
+        # The same day sends X without another E.
+        chain.beat()
+        self.gateway.x25kn_enter_room.assert_called_once()
+        self.assertEqual(self.gateway.x25kn_heartbeat.call_count, 2)
 
 
 class DesktopRewardWarningTests(unittest.TestCase):

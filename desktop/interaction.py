@@ -68,7 +68,7 @@ def recovery_route(snap):
         if snap.get("account"):
             return {"action": "check", "label": "验证登录状态", "message": "登录状态待验证，请立即检查；登录失效可在账号管理扫码。"}
         return {"action": "login", "label": "扫码登录", "message": "尚未确认登录，请扫码登录；已保存登录信息可点击立即检查。"}
-    for field, label in (("connection_warning", "查看连接异常"), ("watch_warning", "核对看播收益"),
+    for field, label in (("connection_warning", "查看连接异常"), ("watch_warning", "核对观看收益"),
                          ("status_error", "重试直播查询"), ("task_error", "核对任务异常")):
         row = next((row for row in snap.get("rows", []) if row.get(field)), None)
         if row:

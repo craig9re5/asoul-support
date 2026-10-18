@@ -445,6 +445,7 @@ class TrayUI:
         connecting = sum(bool(row["active"] and not row.get("heartbeat_healthy", False)
                               and not row.get("heartbeat_stale")) for row in snap["rows"])
         warnings = sum(bool(row.get("watch_warning")) for row in snap["rows"])
+        rotating = sum(bool(row.get("watch_note")) for row in snap["rows"])
         title = "已暂停" if snap["paused"] else f"{active} 个直播间挂机中" if active else "等待开播"
         if snap["error"]:
             title = "需要处理"
@@ -458,7 +459,8 @@ class TrayUI:
             or f"关注 {len(snap['rows'])} · 直播 {live} · "
             + ("已暂停" if snap["paused"] else f"挂机 {active}")
             + (" · 正在检查…" if snap["checking"] else "")
-            + (f" · {warnings} 个看播收益待核验" if warnings else "")
+            + (f" · {warnings} 个观看收益待核验" if warnings else "")
+            + (f" · {rotating} 个收益轮转中" if rotating and not warnings else "")
             + (f" · 连接异常 {stalled}" if stalled else "")
             + (f" · 连接中 {connecting}" if connecting and not snap["paused"] else "")
         )

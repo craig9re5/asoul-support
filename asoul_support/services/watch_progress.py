@@ -8,6 +8,10 @@ from .. import safety
 CHECK_INTERVAL = 10 * 60
 MIN_STALL_SECONDS = 30 * 60
 MAX_REWARD_RECONNECTS = 2
+# The account settles one room per turn, so a busy account can legitimately
+# leave this room flat for well over half an hour.
+ACCOUNT_STALL_SECONDS = 60 * 60
+ROTATION_GRACE_SECONDS = 30 * 60
 
 
 def parse_watch_task(club):
@@ -44,7 +48,7 @@ class ProgressTracker:
         self.last_valid = None
         self.valid = None
 
-    def observe(self, club, day, now, accepted_seconds):
+    def observe(self, club, day, now, accepted_seconds, account=None):
         if day != self.day:
             self.__init__()
             self.day = day
@@ -72,19 +76,27 @@ class ProgressTracker:
         if self.baseline != key:
             self.baseline, self.baseline_at, self.accepted_at = key, now, accepted_seconds
         unchanged = max(0, now - self.baseline_at)
-        stalled = (unchanged >= progress["threshold"]
-                   and accepted_seconds - self.accepted_at >= progress["threshold"])
+        beat_ready = accepted_seconds - self.accepted_at >= progress["threshold"]
+        # With an account view, a single room staying flat only matters once the
+        # whole account has gone quiet too. Without one, keep the local baseline.
+        since = (account or {}).get("seconds_since_credit")
+        account_quiet = account is None or since is None or since >= ACCOUNT_STALL_SECONDS
+        stalled = unchanged >= progress["threshold"] * (2 if account is not None else 1) \
+            and (beat_ready if account is None else account_quiet)
         warning = (f"看播进度已约 {int(unchanged / 60)} 分钟未增长（{progress['current']}/{progress['limit']}），"
-                   "虽有成功心跳，奖励尚未确认；可能延迟结算，请在 B 站核对。" if stalled else "")
+                   + ("整个账号同期也没有到账，" if account_quiet or since >= ROTATION_GRACE_SECONDS
+                      else "但账号仍在其他直播间到账，")
+                   + "虽有成功心跳，奖励尚未确认；可能延迟结算，请在 B 站核对。" if stalled else "")
         return {"status": "stalled" if stalled else "tracking", "warning": warning,
                 "progress": progress, "unchanged_minutes": int(unchanged / 60)}
 
 
 class WatchProgressMonitor:
-    def __init__(self, room, uid, name, sessdata, bili_jct, gateway):
+    def __init__(self, room, uid, name, sessdata, bili_jct, gateway, clock=None):
         self.room, self.uid, self.name = room, uid, name
         self.credentials = (sessdata, bili_jct)
         self.gateway = gateway
+        self.clock = clock
         self.tracker = ProgressTracker()
         self.next_check = 0
         self.accepted_seconds = 0
@@ -114,8 +126,21 @@ class WatchProgressMonitor:
             self.gateway._log({"type": "watch_progress_query_error", "room_id": self.room,
                                "error": type(exc).__name__})
             club = {}
-        self.result = self.tracker.observe(club, self.gateway.task_day(), now, self.accepted_seconds)
+        progress = parse_watch_task(club)
+        account = None
+        if self.clock is not None and progress is not None and not progress.get("done"):
+            try:
+                account = self.clock.observe(self.room, self.gateway.task_day(), progress["current"])
+            except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
+                self.gateway._log({"type": "watch_credit_clock_error", "room_id": self.room,
+                                   "error": type(exc).__name__})
+        self.result = self.tracker.observe(club, self.gateway.task_day(), now,
+                                           self.accepted_seconds, account)
         self.result.update(day=self.tracker.day, checked_at=time.time())
+        if account is not None:
+            self.result["account"] = account
+            self.result["rotation"] = account.get("seconds_since_credit") is not None and \
+                account["seconds_since_credit"] < ACCOUNT_STALL_SECONDS
         if self.verified.get("day") != self.tracker.day:
             self.verified = {}
         if parse_watch_task(club) is not None:
@@ -141,6 +166,14 @@ class WatchProgressMonitor:
                 or self.reconnects >= MAX_REWARD_RECONNECTS
                 or safety.status(self.credentials[0])["blocked"]):
             return
+        account = self.result.get("account") or {}
+        since = account.get("seconds_since_credit")
+        if since is not None and since < ROTATION_GRACE_SECONDS:
+            # The account is still earning elsewhere, so the connection is fine;
+            # only take back a settlement turn once this room has been passed over.
+            passes = account.get("pass_overs")
+            if not isinstance(passes, int) or passes < 2:
+                return
         self.next_recovery_check = now + CHECK_INTERVAL
         # Delayed credit may have arrived since the last scheduled observation.
         self.check(force=True)

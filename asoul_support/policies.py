@@ -6,6 +6,9 @@ DANMAKU_DELAY = 0
 DANMAKU_RECHECK_INTERVAL = 10 * 60
 DANMAKU_WORK_BUDGET = 90
 DANMAKU_ATTEMPTS_PER_CHECK = 16
+# Task work must end this long before the next heartbeat is due; the beat loop
+# only waits the unspent part of the interval, so overrunning it makes X late.
+HEARTBEAT_TASK_MARGIN = 15
 DANMAKU_SESSION_ATTEMPT_LIMIT = 35
 WATCH_MINUTES = 25
 HEARTBEAT_INTERVAL = 60
