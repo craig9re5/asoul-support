@@ -152,7 +152,9 @@ def scan(history=True, root=ROOT, private_values=()):
             scan_blob(data, label, findings, private_values)
         metadata = git("log", "--branches", "--not", "--remotes", "--format=%H%n%an <%ae>%n%cn <%ce>%n%B", root=root)
         scan_blob(metadata.encode(), "history:commit-metadata", findings, private_values)
-        if re.search(r"<[\w.+-]+@(?!users\.noreply\.github\.com)[\w.-]+>", metadata):
+        # Tool attribution is a fixed project trailer, not a contributor address.
+        addresses = re.sub(r"(?m)^Co-Authored-By: Claude Code <noreply@anthropic\.com>\r?$", "", metadata)
+        if re.search(r"<[\w.+-]+@(?!users\.noreply\.github\.com)[\w.-]+>", addresses):
             findings.append({"file": "history:commit-metadata", "kind": "personal author email"})
         for relative in set(git("log", "--branches", "--not", "--remotes", "--format=", "--name-only", "-z", root=root).split("\0")):
             relative = relative.strip("\n")

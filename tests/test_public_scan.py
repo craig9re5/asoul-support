@@ -61,6 +61,12 @@ class PublicScanTests(unittest.TestCase):
         self.assertIn("personal author email", kinds)
         self.assertNotIn(secret, json.dumps(result))
 
+    def test_tool_attribution_trailer_is_not_a_personal_email(self):
+        (self.root / "app.py").write_text("pass")
+        self.git("add", "app.py")
+        self.git("commit", "-m", "Synthetic change\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>")
+        self.assertEqual(scan(root=self.root)["findings"], [])
+
     def test_private_file_collects_encoded_values_without_writing(self):
         path = self.root / "local.json"
         raw = json.dumps({"SESSDATA": "private%2C" * 4, "qr_login_context": {
