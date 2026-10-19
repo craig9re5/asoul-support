@@ -21,11 +21,18 @@ def main():
     parser.add_argument("--watch-only", action="store_true")
     parser.add_argument("--command", choices=["pause", "resume", "check", "show", "exit"])
     parser.add_argument("--show", action="store_true")
+    parser.add_argument("--tk", action="store_true", help="使用兼容的 Tk 桌面界面")
     parser.add_argument("--login", action="store_true", help="打开 B 站扫码登录")
     parser.add_argument("--diagnostic", action="store_true")
+    parser.add_argument("--web-diagnostic", type=Path, metavar="REPORT", help="用隔离数据验收 WebView2 窗口")
+    parser.add_argument("--diagnostic-screenshot", type=Path, metavar="PNG")
     parser.add_argument("--protect-credentials", action="store_true")
     parser.add_argument("--legacy-credentials")
     args = parser.parse_args()
+    if args.web_diagnostic:
+        from desktop.webui.diagnostics import run
+
+        return run(args.web_diagnostic, args.diagnostic_screenshot)
     root = data_dir()
     initialize(root, MEMBERS)
     if args.protect_credentials:
@@ -106,15 +113,23 @@ def main():
         window.destroy()
         job = Job()
         job.close()
+        from desktop.webui.window import available as web_available
+        web_assets = Path(__file__).resolve().parent / "desktop" / "webui" / "assets"
+        frontend_ready = all((web_assets / name).is_file() for name in (
+            "index.html", "style.css", "vendor/react.js", "vendor/react-dom.js",
+            "js/app.js", "js/bridge.js", "js/overview.js", "js/settings.js", "js/dialogs.js",
+        ))
         write_json(
             root / "diagnostic.json",
             {
-                "ok": True,
+                "ok": frontend_ready,
                 "version": APP_VERSION,
                 "frozen": bool(getattr(sys, "frozen", False)),
                 "members": len(members),
                 "icon": icon_image().size,
                 "qr": qr.size,
+                "desktop": {"renderer": "webview2" if web_available() else "tk",
+                            "web_assets": frontend_ready},
             },
         )
         return 0
@@ -127,14 +142,24 @@ def main():
         return 0
     try:
         from desktop.engine import Engine
-        from desktop.ui import TrayUI
 
         engine = Engine(root)
-        ui = TrayUI(engine, show=args.show or not (root / "credentials.json").exists())
-        if args.login:
-            ui.root.after_idle(lambda: ui.open_settings(focus_auth=True, scan=True))
-        engine.start()
-        ui.run()
+        show = args.show or args.login or not (root / "credentials.json").exists()
+        from desktop.webui.window import available as web_available
+
+        if not args.tk and web_available():
+            from desktop.webui.window import WebHost
+
+            ui = WebHost(engine, show=show)
+            ui.run(show=show, login=args.login)
+        else:
+            from desktop.ui import TrayUI
+
+            ui = TrayUI(engine, show=show)
+            if args.login:
+                ui.root.after_idle(lambda: ui.open_settings(focus_auth=True, scan=True))
+            engine.start()
+            ui.run()
     except Exception:
         logging.exception("Desktop startup failed")
         import ctypes

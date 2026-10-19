@@ -3,7 +3,13 @@
 | 组件 | 作用 | 许可文本来源 |
 | --- | --- | --- |
 | Python | 解释器与标准库 | 构建环境的 LICENSE.txt（包含 Python 相关许可） |
-| Tcl/Tk | 桌面窗口 | Python 附带 Tcl/Tk 的 license.terms |
+| Tcl/Tk | 兼容桌面窗口（`--tk`） | Python 附带 Tcl/Tk 的 license.terms |
+| pywebview | WebView2 窗口与 Python 桥接 | pywebview.dist-info/licenses/LICENSE（BSD） |
+| pythonnet / clr_loader | .NET 和 WebView2 加载 | 各发行包自带的 LICENSE（MIT） |
+| Microsoft WebView2 SDK | 嵌入式浏览器控件加载 | Web UI THIRD_PARTY_NOTICES；系统 Evergreen Runtime 不打包 |
+| React / React DOM | 离线界面 | assets/vendor/THIRD_PARTY_NOTICES.txt（MIT） |
+| Babel | 仅构建时编译 JSX | assets/vendor/THIRD_PARTY_NOTICES.txt（MIT）；运行时不加载 |
+| bottle / typing_extensions / proxy_tools / cffi / pycparser | WebView 桥接依赖 | 发行包许可和 Web UI THIRD_PARTY_NOTICES |
 | Pillow | 图标绘制/图像处理 | pillow.dist-info/licenses/LICENSE |
 | pystray | Windows 托盘 | COPYING、COPYING.LGPL；上游仓库 https://github.com/moses-palmer/pystray |
 | six | pystray 的兼容依赖 | six.dist-info/LICENSE |

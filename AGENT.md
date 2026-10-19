@@ -4,7 +4,7 @@
 
 ## 提交
 
-- 每次完成一组改动后**默认提交**，不必等待用户逐次确认。提交前先运行 `python tools/offline_test.py`；失败则修复后再提交，不要提交已知失败的改动。
+- 每次完成一组改动后**默认提交**，不必等待用户逐次确认。按改动范围运行必要检查；改动业务、跨进程边界或桌面生命周期时运行 `python tools/offline_test.py`。单纯文案、样式改动只做对应界面验证，不必反复跑全量测试。不要提交已知失败的改动。
 - 一个提交只做一件事。用户当前请求之外已存在的、未提交的无关改动（其他功能、其他实验）不要顺带提交，也不要丢弃；在回复里说明它们仍留在工作区。
 - 提交信息使用中文摘要 + 简要正文，说明改了什么以及为什么；结尾按仓库约定添加署名行。
 - 只提交源码与文档。`build/`、`dist/`、`logs/`、`*.spec`、凭证与运行时状态文件都已被忽略，不要用 `git add -f` 强制加入。
@@ -27,7 +27,7 @@
 验证命令：
 
 ```powershell
-python tools/offline_test.py        # 必须通过
+python tools/offline_test.py        # 业务、桥接边界或生命周期有改动时运行
 python tools/check_architecture.py  # 改动了模块边界或导入时运行
 ```
 
@@ -45,6 +45,8 @@ python tools/check_architecture.py  # 改动了模块边界或导入时运行
 
 ## 界面
 
-- 视觉常量集中在 `desktop/widgets.py` 与 `desktop/workbench.py`；新增颜色、间距、字号前先复用已有常量。
-- 所有尺寸经 `px()` 做 DPI 缩放，不要写死像素。
-- 网络与磁盘操作不得放在 Tk 主线程；通过 `Dispatcher` 提交并在主线程回调。
+- 默认桌面使用 `desktop/webui`（WebView2 + React）；兼容 Tk 界面可用 `--tk` 启动。
+- Web 界面视觉常量集中在 `desktop/webui/assets/style.css`，组件源文件为 `assets/js/*.jsx`。改 JSX 后运行 `python tools/build_webui.py`，不要直接改生成的 `.js`。
+- Web 界面通过 `window.pywebview.api` 调用 Python，引擎快照是状态来源；不要在页面复制业务规则、保存凭证或直连 B 站。
+- Tk 兼容层复用 `desktop/widgets.py` 与 `desktop/workbench.py` 的视觉常量，所有尺寸经 `px()` 做 DPI 缩放。
+- 网络与磁盘操作不得阻塞界面线程。Web 桥接方法需避免并发重复写；Tk 通过 `Dispatcher` 提交并在主线程回调。

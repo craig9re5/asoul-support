@@ -84,9 +84,13 @@ class SettingsPanel(tk.Frame):
         if scope in ("automation", "all"):
             build_automation(self, container, config, p)
             build_system(self, container, config, p)
-            from .notification_settings import NotificationSettings
-            self.notification_panel = NotificationSettings(container, engine, p)
-            self.notification_panel.pack(fill="x")
+            try:
+                from .notification_settings import NotificationSettings
+            except ImportError:
+                NotificationSettings = None
+            if NotificationSettings is not None:
+                self.notification_panel = NotificationSettings(container, engine, p)
+                self.notification_panel.pack(fill="x")
         if scope in ("account", "all"):
             try:
                 cookies = read_json(engine.root / "credentials.json", {})

@@ -6,3 +6,9 @@
 *.ps1 text eol=crlf
 *.png binary
 *.ico binary
+*.jsx text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+desktop/webui/assets/vendor/*.js -text

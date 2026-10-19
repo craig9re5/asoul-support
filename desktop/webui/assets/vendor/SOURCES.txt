@@ -1,0 +1,3 @@
+0c6c8bc40ca3ab47fd48fa557af0fa220ced085967305ea85bf5d01a67def88b19f13a84883adc1e430b288e9f881fd9  react.js  https://unpkg.com/react@18.3.1/umd/react.production.min.js
+8131b1873db595519834c71d24ecaad3511d8348e19ff736da7b31d24caa3f44f1695e5655db121f57d20d47f96098f5  react-dom.js  https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js
+9b4f0a89d88da8b76926a2eaf791bf2c48bc42f8e5ff1518965dd020bca932843ae50a2b27d2efb69d915d8181163d72  babel.js  https://unpkg.com/@babel/standalone@7.29.0/babel.min.js

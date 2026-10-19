@@ -1,5 +1,6 @@
 """Process adapters. Desktop and CLI invoke the same application services."""
 
+import logging
 import os
 import time
 from asoul_support.application import AppContext
@@ -17,9 +18,16 @@ def probe(root, output):
         _, members = load_config(root)
         result = prepare(root).probe(members)
     except (OSError, ValueError, RuntimeError) as exc:
-        result = {"error": f"检查失败（{type(exc).__name__}），请检查配置和网络。"}
-        if isinstance(exc, ValueError) and "登录凭证" in str(exc):
+        # The UI shows cause and next step; the exception type stays in the log.
+        missing_login = isinstance(exc, ValueError) and "登录凭证" in str(exc)
+        result = {
+            "error": "还没有登录，扫码后才能检查直播状态。"
+            if missing_login
+            else "无法检查直播状态。确认网络和配置后重试。"
+        }
+        if missing_login:
             result["auth_invalid"] = True
+        logging.exception("Probe failed")
     write_json(output, result)
     return 1 if result.get("error") else 0
 

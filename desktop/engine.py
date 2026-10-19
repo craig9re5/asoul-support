@@ -14,7 +14,10 @@ from pathlib import Path
 from desktop.storage import load_config, read_json, write_json, read_status
 from desktop.windows import Job
 from asoul_support.runtime import update_json, append_event
-from asoul_support.notifications.service import DailyNotifications
+try:
+    from asoul_support.notifications.service import DailyNotifications
+except ImportError:
+    DailyNotifications = None
 
 # The GUI reads Engine.snapshot() directly; status.json only serves other processes,
 # and read_status accepts 15 seconds of age. Publishing every tick was pure disk churn.
@@ -32,7 +35,7 @@ class Engine:
     def __init__(self, root, *, job=None):
         self.root = root
         self.application = AppContext(root)
-        self.notifications = DailyNotifications(root)
+        self.notifications = DailyNotifications(root) if DailyNotifications else None
         self.lock = threading.RLock()
         self.stopping = threading.Event()
         self.job = job if job is not None else Job()
@@ -74,7 +77,8 @@ class Engine:
         self.thread = threading.Thread(target=self.run, name="monitor", daemon=True)
 
     def start(self):
-        self.notifications.start()
+        if self.notifications is not None:
+            self.notifications.start()
         self.thread.start()
 
     def _credentials_signature(self):
@@ -259,7 +263,8 @@ class Engine:
 
     def close(self):
         self.stopping.set()
-        self.notifications.stop()
+        if self.notifications is not None:
+            self.notifications.stop()
         with self.lock:
             self.stop_children("exited")
             self.job.close()
@@ -267,7 +272,8 @@ class Engine:
         if self.thread.is_alive():
             self.thread.join(timeout=5)
         # This runs in the control executor, not Tk. Finish any accepted IO before exit.
-        self.notifications.join()
+        if self.notifications is not None:
+            self.notifications.join()
 
     def _read_room_state(self, room):
         try:

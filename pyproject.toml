@@ -14,7 +14,7 @@ dependencies = []
 
 [project.optional-dependencies]
 secure-store = ["keyring>=25,<26"]
-desktop = ["pystray==0.19.5", "Pillow==12.2.0", "qrcode==8.2"]
+desktop = ["pystray==0.19.5", "Pillow==12.2.0", "qrcode==8.2", "pywebview==6.2.1; sys_platform == 'win32'", "pythonnet==3.2.1; sys_platform == 'win32'"]
 
 [project.scripts]
 asoul-heartbeat = "asoul_support.entrypoints:heartbeat"

@@ -21,9 +21,11 @@
 
 在设置中配置登录凭证和动作开关。数据保存在 `%LOCALAPPDATA%\LiveSupport`，不保存在源码目录。完整安装与开机启动说明见 [DESKTOP.md](DESKTOP.md)。
 
-推荐在设置中点击「扫码登录」，用 B 站 App 扫码确认即可。[扫码登录说明](docs/QR_LOGIN.md)。
+桌面默认使用 WebView2 + React 界面，前端资源随程序离线打包。使用「账号 → 扫码登录」并在 B 站 App 确认即可。[扫码登录说明](docs/QR_LOGIN.md)。
 
-从源码运行（桌面环境需 Python 3.10+）：
+Windows 需安装 Microsoft Edge WebView2 Runtime；不可用时自动使用 Tk 兼容界面，也可用 `python tray_app.py --tk --show` 手动选择。界面开发与构建说明见 [Web 桌面说明](docs/WEB_UI.md)。
+
+从源码运行（Web 桌面环境需 Python 3.11+）：
 
 ```powershell
 python -m pip install -r requirements-desktop.txt

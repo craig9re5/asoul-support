@@ -3,9 +3,11 @@
 ## 分层与入口
 
 ```text
-scripts/*.py（兼容命令）                 desktop.view / dialogs
+scripts/*.py（兼容命令）            React / CSS（desktop.webui.assets）
+      ↓                                    ↓ pywebview.api
+asoul_support.cli                  desktop.webui.api / window
       ↓                                    ↓
-asoul_support.cli                  desktop.engine / worker / dispatch
+                                  desktop.engine / worker
       ↓                                    ↓
 stateless heartbeat gateway ←──── asoul_support.application.AppContext
       ↓
@@ -30,7 +32,7 @@ http / runtime / credentials / members / context / danmaku_pacing
 | 账号异常暂停、底层请求预算 | safety + http | 同一数据目录内跨进程共享；写请求未知结果不重放 |
 | 登录会话密文、账号请求头 | secret_store + session_headers | Windows 用户 DPAPI 或系统凭据库；原子迁移、账号匹配 |
 | 监控子进程、巡检时间、缓存 | desktop.Engine | 桌面实例；Windows Job 管理其子进程 |
-| 控件及主线程回调 | TrayUI / dialogs / Dispatcher | GUI 实例；3 个后台 IO 线程，回调在 Tk 主线程执行 |
+| 窗口、托盘及界面桥接 | WebHost / Api / React | WebView2 渲染本地页面，Python 串行处理写操作，通过快照发布状态；Tk 兼容层使用 Dispatcher |
 | 公共设备 Cookie | RuntimeContext 的 SessionProvider | 应用作用域内按线程隔离；不保存登录凭证到全局缓存 |
 
 `EVENT_CONTEXT` 仅存日志会话字段，不控制动作策略。动作开关是显式参数。桌面 worker 不修改 `sys.argv`、`MEMBERS`、`_log` 或路径变量。
@@ -41,7 +43,7 @@ http / runtime / credentials / members / context / danmaku_pacing
 2. **监控**：Engine 应用最新设置 → 启动每房间 worker → AppContext 传递策略 → CLI 的共享会话协调器取得 OS 房间租约 → HeartbeatChain 按服务端间隔发 X。
 3. **每日任务**：房间任务锁 → 保留尝试额度 → 读取服务端状态 → 必要时点亮 → 发送剩余弹幕 → 再读状态；点赞单独执行并验证任务轮次。每 10 分钟检查未完成项，跨日重置。
 4. **手动补齐/签到**：桌面手动动作、CLI 点赞和签到所有模式调用同一个 DailyTaskRunner，复用预算、锁、阶段与完成判定。
-5. **显示**：snapshot 接收内存状态及读取后的房间记录，投影为行；view 更新摘要与表格；布局、控件、对话框与调度分开。
+5. **显示**：snapshot 接收内存状态及读取后的房间记录，投影为行；Web 桥接补充操作可用性和账号状态，React 更新列表与详情。页面不直接访问 B 站、不持有登录凭证。`--tk` 保留原有兼容界面。
 6. **内容**：查询并验证日期范围的分页 → 筛选 → 执行选择的互动 → 汇总；查询错误不能伪装成空列表。
 
 ## 并发、存储与失败

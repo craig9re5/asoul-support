@@ -1,4 +1,17 @@
+# Windows desktop build: CPython 3.11–3.15 with Tcl/Tk.
 pyinstaller==6.22.2
+pyinstaller-hooks-contrib==2026.6
 pystray==0.19.5
 Pillow==12.2.0
 qrcode==8.2
+
+# WebView2 host and its resolved Python dependencies. The Evergreen WebView2
+# browser runtime and .NET Framework are OS prerequisites, not pip packages.
+pywebview==6.2.1
+pythonnet==3.2.1; sys_platform == "win32"
+clr_loader==0.3.1; sys_platform == "win32"
+cffi==2.0.0; sys_platform == "win32"
+pycparser==3.0; sys_platform == "win32"
+bottle==0.13.4
+proxy_tools==0.1.0
+typing_extensions==4.15.0

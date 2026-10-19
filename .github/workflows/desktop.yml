@@ -29,7 +29,7 @@ jobs:
         run: |
           Copy-Item -LiteralPath README.md,DESKTOP.md,Install-Desktop.ps1,LICENSE,NOTICE.md,THIRD_PARTY_LICENSES.md -Destination dist/onefile
           New-Item -ItemType Directory -Path dist/onefile/docs -Force | Out-Null
-          Copy-Item -LiteralPath docs/GUI_REVIEW.md,docs/QR_LOGIN.md,docs/ACCOUNT_EXPERIMENT.md,docs/LIVE_LIKES.md,docs/ACCOUNT_SAFETY.md -Destination dist/onefile/docs
+          Copy-Item -LiteralPath docs/GUI_REVIEW.md,docs/QR_LOGIN.md,docs/ACCOUNT_EXPERIMENT.md,docs/LIVE_LIKES.md,docs/ACCOUNT_SAFETY.md,docs/WEB_UI.md -Destination dist/onefile/docs
       - uses: actions/upload-artifact@v4
         with:
           name: LiveSupport-Windows
