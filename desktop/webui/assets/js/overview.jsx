@@ -21,18 +21,14 @@ const RoomRow = ({ room, selected, onSelect, onContextMenu, image }) => (
       </span>
       {room.live && room.title && <span className="room-title" title={room.title}>{room.title}</span>}
       <span className="room-meta">
-        {room.healthy ? <span>已连接 {durationLabel(room.minutes)}</span>
-          : <span>{room.state}</span>}
-        {room.gain !== null && <>
-          <span className="sep">·</span>
-          <span>今日 +{numberLabel(room.gain)}</span>
-        </>}
+        {room.healthy && <span>已连接 {durationLabel(room.minutes)}</span>}
+        {room.healthy && room.gain !== null && <span className="sep">·</span>}
+        {room.gain !== null && <span>今日 +{numberLabel(room.gain)}</span>}
       </span>
     </span>
-    <span className="room-side">
-      {room.live && <span className={`pill ${room.tone}`}>{room.state}</span>}
-      {!room.live && <span className="pill muted">{room.state}</span>}
-    </span>
+    {room.state !== "未开播" && <span className="room-side">
+      <span className={`pill ${room.tone}`}>{room.state}</span>
+    </span>}
   </button>
 );
 
@@ -59,7 +55,7 @@ const DetailPanel = ({ room, busy, onAction, onOpen, onRemove, image }) => {
         <div className="detail-heading">
           <div className="detail-identity">
             <div className="detail-name">{room.name}</div>
-            <div className="detail-title" title={room.title}>{room.live ? room.title || "直播中" : room.state}</div>
+            <div className="detail-title" title={room.title}>{room.live ? room.title || "直播中" : "等待主播开播"}</div>
           </div>
           <button type="button" className="btn ghost icon-button" title="更多操作"
             aria-label="更多操作" onClick={onRemove}><Icon name="more" size={17} /></button>

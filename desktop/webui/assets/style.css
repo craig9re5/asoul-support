@@ -120,7 +120,6 @@ button:disabled, select:disabled { cursor: default; }
 
 .brand-text { display: flex; flex-direction: column; line-height: 1.25; }
 .brand-name { font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
-.brand-sub { font-size: 10.5px; color: var(--ink-3); }
 
 .nav { display: flex; flex-direction: column; gap: 1px; }
 
@@ -694,7 +693,7 @@ button:disabled, select:disabled { cursor: default; }
   padding: 18px 24px 28px;
 }
 
-.settings-inner { max-width: 720px; }
+.settings-inner { max-width: 1120px; }
 
 .settings h2 {
   margin: 0 0 3px;
@@ -960,13 +959,6 @@ button:disabled, select:disabled { cursor: default; }
 
 .banner svg { flex: 0 0 14px; }
 
-.side-version {
-  padding: 4px 9px 0;
-  font-size: 10px;
-  color: var(--ink-3);
-  letter-spacing: 0.02em;
-}
-
 .modal.wide { width: min(460px, calc(100vw - 32px)); }
 
 .qr-svg { width: 100%; height: 100%; display: grid; place-items: center; }
@@ -1097,9 +1089,9 @@ button:disabled, select:disabled { cursor: default; }
   display: grid; place-items: center; width: 29px; height: 29px;
   flex: 0 0 29px; border-radius: 50%; background: #e7e5e1; color: var(--ink-2); font-size: 12px;
 }
-.sidebar-account-text { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
+.sidebar-account-text { display: flex; min-width: 0; flex-direction: column; }
 .sidebar-account-text strong { font-size: 12px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sidebar-account-text > span { font-size: 10px; color: var(--ink-3); }
+.account-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .detail-heading { display: flex; align-items: flex-start; gap: 6px; }
 .detail-identity { flex: 1; min-width: 0; }
 .icon-button { width: 25px; padding: 0; }
@@ -1133,7 +1125,7 @@ button:disabled, select:disabled { cursor: default; }
   .detail { width: 310px; flex-basis: 310px; }
 }
 @media (max-width: 720px) {
-  .sidebar-account-text, .side-version { display: none; }
+  .sidebar-account-text { display: none; }
   .sidebar-account { justify-content: center; padding: 12px 0 0; }
   .settings { padding: 14px 12px 22px; }
   .banner { margin: 8px 12px 0; flex-wrap: wrap; }

@@ -1,4 +1,4 @@
-/* LiveSupport JSX {"code_sha256":"32cf36e568f037286217ce2245f2720fd8d29dc9819e113eef33446a5d98aa59","compiler_sha256":"2623a9e22809915ce789b4461154e277ddce520d5a4320c14d44332a5d0dcea0","pipeline_sha256":"e774ed3dcaf52bf175bb1ead66127d902fc59b7457073a7dec6ceea54b6806f9","schema":1,"source":"overview.jsx","source_sha256":"26868b52ece002d50be17977cfe7f8eda7f3a1ad3265a8dc8d051ef0f05475c2"} */
+/* LiveSupport JSX {"code_sha256":"0120f5feaa8dee2b57bb5d664167c45063ed8f5dc3ca7864b4ec0b7c32cd9e2b","compiler_sha256":"2623a9e22809915ce789b4461154e277ddce520d5a4320c14d44332a5d0dcea0","pipeline_sha256":"e774ed3dcaf52bf175bb1ead66127d902fc59b7457073a7dec6ceea54b6806f9","schema":1,"source":"overview.jsx","source_sha256":"2023cafd014eee20753d7817c29f5f47c0e10786e938a54cc9632103fca9e2eb"} */
 (function () {
 "use strict";
 /* Overview and room detail. Labels describe verified state from the engine. */
@@ -53,14 +53,12 @@ const RoomRow = ({
   title: room.title
 }, room.title), /*#__PURE__*/React.createElement("span", {
   className: "room-meta"
-}, room.healthy ? /*#__PURE__*/React.createElement("span", null, "\u5DF2\u8FDE\u63A5 ", durationLabel(room.minutes)) : /*#__PURE__*/React.createElement("span", null, room.state), room.gain !== null && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+}, room.healthy && /*#__PURE__*/React.createElement("span", null, "\u5DF2\u8FDE\u63A5 ", durationLabel(room.minutes)), room.healthy && room.gain !== null && /*#__PURE__*/React.createElement("span", {
   className: "sep"
-}, "\xB7"), /*#__PURE__*/React.createElement("span", null, "\u4ECA\u65E5 +", numberLabel(room.gain))))), /*#__PURE__*/React.createElement("span", {
+}, "\xB7"), room.gain !== null && /*#__PURE__*/React.createElement("span", null, "\u4ECA\u65E5 +", numberLabel(room.gain)))), room.state !== "未开播" && /*#__PURE__*/React.createElement("span", {
   className: "room-side"
-}, room.live && /*#__PURE__*/React.createElement("span", {
+}, /*#__PURE__*/React.createElement("span", {
   className: `pill ${room.tone}`
-}, room.state), !room.live && /*#__PURE__*/React.createElement("span", {
-  className: "pill muted"
 }, room.state)));
 const DetailPanel = ({
   room,
@@ -102,7 +100,7 @@ const DetailPanel = ({
   }, room.name), /*#__PURE__*/React.createElement("div", {
     className: "detail-title",
     title: room.title
-  }, room.live ? room.title || "直播中" : room.state)), /*#__PURE__*/React.createElement("button", {
+  }, room.live ? room.title || "直播中" : "等待主播开播")), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "btn ghost icon-button",
     title: "\u66F4\u591A\u64CD\u4F5C",

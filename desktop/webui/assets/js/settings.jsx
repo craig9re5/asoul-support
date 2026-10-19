@@ -80,13 +80,12 @@ const AccountPage = ({ account, onScan, onLogout, onResumeSafety, onCheck, busy,
               {account.signed_in ? account.confirmed ? `${relativeTime(account.checked_at)}验证` : "检查状态以验证登录" : "扫码后开始自动挂机与每日任务"}
             </div>
           </div>
-          <button type="button" className="btn primary" onClick={onScan} disabled={busy}><Icon name="qr" size={13} />
-            {account.signed_in ? "切换账号" : "扫码登录"}</button>
+          <div className="account-actions">
+            <button type="button" className="btn primary" onClick={onScan} disabled={busy}><Icon name="qr" size={13} />
+              {account.signed_in ? "切换账号" : "扫码登录"}</button>
+            {account.signed_in && <button type="button" className="btn sm" onClick={onLogout} disabled={busy}>退出登录</button>}
+          </div>
         </div>
-        <SettingRow name="登录凭证" desc="加密保存在本机，不会在界面中显示">
-          {account.signed_in ? <button type="button" className="btn sm" onClick={onLogout} disabled={busy}>退出登录</button>
-            : <span className="block-note">未保存</span>}
-        </SettingRow>
       </section>
       <section className="group card">
         <header className="group-head">账号保护</header>

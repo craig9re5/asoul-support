@@ -1,4 +1,4 @@
-/* LiveSupport JSX {"code_sha256":"7682da671f9a4beed97a51b63b5f1f7ab8eda4a078a26ea8e6f6e1e8e6d3157c","compiler_sha256":"2623a9e22809915ce789b4461154e277ddce520d5a4320c14d44332a5d0dcea0","pipeline_sha256":"e774ed3dcaf52bf175bb1ead66127d902fc59b7457073a7dec6ceea54b6806f9","schema":1,"source":"app.jsx","source_sha256":"cc9c0814847eef242c0c36ad445c30b0f2b6e44b29e25039c0db63622a87773e"} */
+/* LiveSupport JSX {"code_sha256":"3c1dc7bac7b91f366df446459579180794536ca70176acacee2af87945e4e66b","compiler_sha256":"2623a9e22809915ce789b4461154e277ddce520d5a4320c14d44332a5d0dcea0","pipeline_sha256":"e774ed3dcaf52bf175bb1ead66127d902fc59b7457073a7dec6ceea54b6806f9","schema":1,"source":"app.jsx","source_sha256":"114ca44e61dde36a8b56f58f4f9320e8f889defcbc67e2ce486088a86690a863"} */
 (function () {
 "use strict";
 function _extends() { return _extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, _extends.apply(null, arguments); }
@@ -46,8 +46,7 @@ const Sidebar = ({
   onPage,
   account,
   onLogs,
-  onQuit,
-  version
+  onQuit
 }) => /*#__PURE__*/React.createElement("aside", {
   className: "side"
 }, /*#__PURE__*/React.createElement("div", {
@@ -60,9 +59,7 @@ const Sidebar = ({
   className: "brand-text"
 }, /*#__PURE__*/React.createElement("span", {
   className: "brand-name"
-}, "LiveSupport"), /*#__PURE__*/React.createElement("span", {
-  className: "brand-sub"
-}, "\u76F4\u64AD\u52A9\u624B"))), /*#__PURE__*/React.createElement("nav", {
+}, "LiveSupport"))), /*#__PURE__*/React.createElement("nav", {
   className: "nav",
   "aria-label": "\u4E3B\u5BFC\u822A"
 }, [["monitor", "monitor", "直播总览"], ["automation", "sliders", "挂机设置"], ["account", "user", "账号"]].map(([key, icon, text]) => /*#__PURE__*/React.createElement("button", {
@@ -105,9 +102,7 @@ const Sidebar = ({
   className: "sidebar-avatar"
 }, Array.from(account.name || "?")[0]), /*#__PURE__*/React.createElement("span", {
   className: "sidebar-account-text"
-}, /*#__PURE__*/React.createElement("strong", null, account.name || (account.signed_in ? "等待验证" : "尚未登录")), /*#__PURE__*/React.createElement("span", null, account.confirmed ? "已登录 B 站" : account.signed_in ? "登录状态待确认" : "扫码后开始挂机"))), /*#__PURE__*/React.createElement("div", {
-  className: "side-version"
-}, version ? `v${version}` : "LiveSupport"));
+}, /*#__PURE__*/React.createElement("strong", null, account.name || (account.signed_in ? "等待验证" : "尚未登录")))));
 function App() {
   const [page, setPage] = useState("monitor");
   const [snap, setSnap] = useState(EMPTY_SNAPSHOT);
@@ -538,8 +533,7 @@ function App() {
     onLogs: () => invoke("open_logs"),
     onQuit: () => setDialog({
       type: "quit"
-    }),
-    version: snap.version
+    })
   }), /*#__PURE__*/React.createElement("main", {
     className: "main",
     "aria-busy": !connected

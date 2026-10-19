@@ -1,4 +1,4 @@
-/* LiveSupport JSX {"code_sha256":"b7c58f780963a313a8d4f82aac92ef106b1e7ee0668e2b4d4d0fa53f3b13a2ba","compiler_sha256":"2623a9e22809915ce789b4461154e277ddce520d5a4320c14d44332a5d0dcea0","pipeline_sha256":"e774ed3dcaf52bf175bb1ead66127d902fc59b7457073a7dec6ceea54b6806f9","schema":1,"source":"settings.jsx","source_sha256":"336878c84dc9f9167170c725ef0afeecde6822d3a96bd5a225b83be7cfefa0a8"} */
+/* LiveSupport JSX {"code_sha256":"2bcf465d4fa1e1faca8cec622466636957413a7e18a45d8f17b7c059aec8d7e0","compiler_sha256":"2623a9e22809915ce789b4461154e277ddce520d5a4320c14d44332a5d0dcea0","pipeline_sha256":"e774ed3dcaf52bf175bb1ead66127d902fc59b7457073a7dec6ceea54b6806f9","schema":1,"source":"settings.jsx","source_sha256":"eb6d579c11fb8d01233179f7c57403aba116e101d1cc4870aa8250ef83d6f32e"} */
 (function () {
 "use strict";
 /* Settings use the same vocabulary as the overview; changes apply through Python. */
@@ -172,7 +172,9 @@ const AccountPage = ({
   }, account.name || (account.signed_in ? "登录状态待确认" : "尚未登录")), /*#__PURE__*/React.createElement("div", {
     className: "account-meta",
     title: absoluteTime(account.checked_at)
-  }, account.signed_in ? account.confirmed ? `${relativeTime(account.checked_at)}验证` : "检查状态以验证登录" : "扫码后开始自动挂机与每日任务")), /*#__PURE__*/React.createElement("button", {
+  }, account.signed_in ? account.confirmed ? `${relativeTime(account.checked_at)}验证` : "检查状态以验证登录" : "扫码后开始自动挂机与每日任务")), /*#__PURE__*/React.createElement("div", {
+    className: "account-actions"
+  }, /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "btn primary",
     onClick: onScan,
@@ -180,17 +182,12 @@ const AccountPage = ({
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "qr",
     size: 13
-  }), account.signed_in ? "切换账号" : "扫码登录")), /*#__PURE__*/React.createElement(SettingRow, {
-    name: "\u767B\u5F55\u51ED\u8BC1",
-    desc: "\u52A0\u5BC6\u4FDD\u5B58\u5728\u672C\u673A\uFF0C\u4E0D\u4F1A\u5728\u754C\u9762\u4E2D\u663E\u793A"
-  }, account.signed_in ? /*#__PURE__*/React.createElement("button", {
+  }), account.signed_in ? "切换账号" : "扫码登录"), account.signed_in && /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "btn sm",
     onClick: onLogout,
     disabled: busy
-  }, "\u9000\u51FA\u767B\u5F55") : /*#__PURE__*/React.createElement("span", {
-    className: "block-note"
-  }, "\u672A\u4FDD\u5B58"))), /*#__PURE__*/React.createElement("section", {
+  }, "\u9000\u51FA\u767B\u5F55")))), /*#__PURE__*/React.createElement("section", {
     className: "group card"
   }, /*#__PURE__*/React.createElement("header", {
     className: "group-head"

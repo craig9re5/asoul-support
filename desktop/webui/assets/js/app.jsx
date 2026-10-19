@@ -7,10 +7,10 @@ const DEFAULT_SETTINGS = { auto_revive: true, auto_danmaku_intimacy: true, auto_
 const EMPTY_SNAPSHOT = { rows: [], paused: false, checking: false, error: "", account: "", safety: {},
   settings: DEFAULT_SETTINGS, accountInfo: { signed_in: false, name: "", confirmed: false, safety: {} } };
 
-const Sidebar = ({ page, onPage, account, onLogs, onQuit, version }) => (
+const Sidebar = ({ page, onPage, account, onLogs, onQuit }) => (
   <aside className="side">
     <div className="brand"><div className="logo"><Pulse size={18} /></div>
-      <div className="brand-text"><span className="brand-name">LiveSupport</span><span className="brand-sub">直播助手</span></div>
+      <div className="brand-text"><span className="brand-name">LiveSupport</span></div>
     </div>
     <nav className="nav" aria-label="主导航">
       {[ ["monitor", "monitor", "直播总览"], ["automation", "sliders", "挂机设置"], ["account", "user", "账号"] ].map(([key, icon, text]) =>
@@ -24,10 +24,8 @@ const Sidebar = ({ page, onPage, account, onLogs, onQuit, version }) => (
     </nav>
     <button type="button" className="sidebar-account" onClick={() => onPage("account")} title="账号管理">
       <span className="sidebar-avatar">{Array.from(account.name || "?")[0]}</span>
-      <span className="sidebar-account-text"><strong>{account.name || (account.signed_in ? "等待验证" : "尚未登录")}</strong>
-        <span>{account.confirmed ? "已登录 B 站" : account.signed_in ? "登录状态待确认" : "扫码后开始挂机"}</span></span>
+      <span className="sidebar-account-text"><strong>{account.name || (account.signed_in ? "等待验证" : "尚未登录")}</strong></span>
     </button>
-    <div className="side-version">{version ? `v${version}` : "LiveSupport"}</div>
   </aside>
 );
 
@@ -324,7 +322,7 @@ function App() {
   return (
     <div className="app">
       <Sidebar page={page} onPage={setPage} account={account} onLogs={() => invoke("open_logs")}
-        onQuit={() => setDialog({ type: "quit" })} version={snap.version} />
+        onQuit={() => setDialog({ type: "quit" })} />
       <main className="main" aria-busy={!connected}>
         {page === "monitor" && <window.Overview rooms={rooms} selectedId={selectedId} onSelect={select}
           paused={snap.paused} onTogglePause={() => control("toggle_pause")}
